@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Caching.Memory;
 using SpotGet.Models;
 
 namespace SpotGet.Services;
@@ -15,6 +16,21 @@ public partial class SpotifyService : ISpotifyService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<SpotifyService> _logger;
+    private readonly IMemoryCache _cache;
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
+
+    // Пул User-Agent рядків для ротації при запитах до Spotify.
+    private static readonly string[] UserAgents =
+    [
+        "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Mozilla/5.0 (compatible; Bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+        "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+        "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Twitterbot/1.0",
+        "Mozilla/5.0 (compatible; DuckDuckBot-Https/1.1; https://duckduckgo.com/duckduckbot)",
+        "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+        "TelegramBot (like TwitterBot)"
+    ];
 
     // Regex для парсингу Track ID з різних форматів посилань Spotify.
     [GeneratedRegex(@"(?:spotify\.com/track/|spotify:track:)([a-zA-Z0-9]{22})")]
@@ -22,21 +38,36 @@ public partial class SpotifyService : ISpotifyService
 
     // Regex для витягування значення content із <meta> тегів.
     // Підтримує обидва порядки атрибутів: property/name → content та content → property/name.
-    [GeneratedRegex("""<meta\s+(?:(?:property|name)="(?<prop>[^"]+)"\s+content="(?<val>[^"]*)"|content="(?<val2>[^"]*)"\s+(?:property|name)="(?<prop2>[^"]+)")\s*/?>""")]
+    [GeneratedRegex("""<meta\s+(?:(?:property|name)="(?<prop>[^"]+)"\s+content="(?<val>[^"]*)"|content="(?<val2>[^"]*)"\s+(?:property|name)="(?<prop2>[^"]+)")\s*/?>""")] 
     private static partial Regex MetaTagRegex();
+
+    private static string GetRandomUserAgent()
+    {
+        return UserAgents[Random.Shared.Next(UserAgents.Length)];
+    }
 
     public SpotifyService(
         HttpClient httpClient,
-        ILogger<SpotifyService> logger)
+        ILogger<SpotifyService> logger,
+        IMemoryCache cache)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _cache = cache;
     }
 
     /// <inheritdoc />
     public async Task<SpotTrackDto> GetTrackInfoAsync(string spotifyUrl)
     {
         var trackId = ParseTrackId(spotifyUrl);
+        var cacheKey = $"track:{trackId}";
+
+        if (_cache.TryGetValue(cacheKey, out SpotTrackDto? cached) && cached is not null)
+        {
+            _logger.LogInformation("Cache hit for track {TrackId}", trackId);
+            return cached;
+        }
+
         var canonicalUrl = $"https://open.spotify.com/track/{trackId}";
 
         _logger.LogInformation("Fetching metadata for track {TrackId}", trackId);
@@ -81,7 +112,7 @@ public partial class SpotifyService : ISpotifyService
             }
         }
 
-        return new SpotTrackDto
+        var result = new SpotTrackDto
         {
             Title = oembed.Title,
             Artist = artist,
@@ -92,6 +123,9 @@ public partial class SpotifyService : ISpotifyService
             SpotifyUrl = meta.GetValueOrDefault("og:url", canonicalUrl),
             ArtistInfo = artistInfo
         };
+
+        _cache.Set(cacheKey, result, CacheDuration);
+        return result;
     }
 
     // Helpers
@@ -159,8 +193,7 @@ public partial class SpotifyService : ISpotifyService
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         // Spotify повертає повні OG/music мета-теги лише для пошукових ботів.
-        request.Headers.UserAgent.ParseAdd(
-            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)");
+        request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
 
         var response = await _httpClient.SendAsync(request);
 
@@ -209,8 +242,7 @@ public partial class SpotifyService : ISpotifyService
     private async Task<SpotArtistDto> FetchArtistInfoAsync(string artistPageUrl)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, artistPageUrl);
-        request.Headers.UserAgent.ParseAdd(
-            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)");
+        request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
 
         var response = await _httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
