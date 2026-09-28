@@ -1,4 +1,4 @@
-/* ── CSS Reset & Variables ────────────────────────────────── */
+/* CSS Reset & Variables */
 *,
 *::before,
 *::after {
@@ -45,7 +45,7 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* ── Ambient background glow ─────────────────────────────── */
+/* Ambient background glow */
 .bg-glow {
     position: fixed;
     top: -30%;
@@ -71,7 +71,7 @@ body {
     }
 }
 
-/* ── Container ───────────────────────────────────────────── */
+/* Container */
 .container {
     position: relative;
     z-index: 1;
@@ -81,7 +81,7 @@ body {
     flex: 1;
 }
 
-/* ── Hero / Header ───────────────────────────────────────── */
+/* Hero / Header */
 .hero {
     text-align: center;
     margin-bottom: 2.5rem;
@@ -110,7 +110,7 @@ body {
     font-weight: 400;
 }
 
-/* ── Search Bar ──────────────────────────────────────────── */
+/* Search Bar */
 .search-section {
     margin-bottom: 2rem;
 }
@@ -237,7 +237,7 @@ body {
     }
 }
 
-/* ── Error Card ──────────────────────────────────────────── */
+/* Error Card */
 .error-card {
     display: flex;
     align-items: center;
@@ -261,7 +261,7 @@ body {
     display: none;
 }
 
-/* ── Result Card ─────────────────────────────────────────── */
+/* Result Card */
 .result-card {
     display: flex;
     gap: 1.5rem;
@@ -409,7 +409,7 @@ body {
     color: var(--spotify-green-light);
 }
 
-/* ── Actions Row ─────────────────────────────────────────── */
+/* Actions Row */
 .actions-row {
     display: flex;
     align-items: center;
@@ -451,7 +451,7 @@ body {
 }
 
 
-/* ── Artist Card ─────────────────────────────────────────── */
+/* Artist Card */
 .artist-card {
     display: flex;
     align-items: center;
@@ -506,7 +506,7 @@ body {
     line-height: 1.4;
 }
 
-/* ── Footer ──────────────────────────────────────────────── */
+/* Footer */
 .footer {
     text-align: center;
     padding: 1.5rem 1rem;
@@ -515,7 +515,7 @@ body {
     z-index: 1;
 }
 
-/* ── Responsive ──────────────────────────────────────────── */
+/* Responsive */
 @media (max-width: 560px) {
     .result-card {
         flex-direction: column;

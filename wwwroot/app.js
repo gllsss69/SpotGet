@@ -1,4 +1,4 @@
-// ── SpotGet Frontend ────────────────────────────────────────
+// SpotGet Frontend
 
 const form = document.getElementById('trackForm');
 const urlInput = document.getElementById('spotifyUrl');
@@ -35,7 +35,7 @@ const artistLink        = document.getElementById('artistLink');
 let currentAudio = null;
 let isPlaying = false;
 
-// ── Paste button ────────────────────────────────────────────
+// Paste button
 pasteBtn.addEventListener('click', async () => {
     try {
         const text = await navigator.clipboard.readText();
@@ -46,7 +46,7 @@ pasteBtn.addEventListener('click', async () => {
     }
 });
 
-// ── Form submit ─────────────────────────────────────────────
+// Form submit
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -68,19 +68,19 @@ form.addEventListener('submit', async (e) => {
         const data = await response.json();
 
         if (!response.ok) {
-            showError(data.error || data.detail || 'Unknown error');
+            showError(translateError(data.error || data.detail || 'Unknown error'));
             return;
         }
 
         showResult(data);
     } catch (err) {
-        showError('Could not connect to the server.');
+        showError(translations[currentLang].errConn);
     } finally {
         setLoading(false);
     }
 });
 
-// ── Download button ─────────────────────────────────────────
+// Download button
 downloadBtn.addEventListener('click', async () => {
     const url = urlInput.value.trim();
     if (!url) return;
@@ -97,7 +97,7 @@ downloadBtn.addEventListener('click', async () => {
 
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            showError(data.error || data.detail || 'Failed to download the track.');
+            showError(translateError(data.error || data.detail || translations[currentLang].errDl));
             return;
         }
 
@@ -123,13 +123,13 @@ downloadBtn.addEventListener('click', async () => {
         a.remove();
 
     } catch (err) {
-        showError('An error occurred during download.');
+        showError(translations[currentLang].errDlGeneric);
     } finally {
         setDownloadLoading(false);
     }
 });
 
-// ── Preview Player ──────────────────────────────────────────
+// Preview Player
 
 coverOverlay.addEventListener('click', () => {
     if (!currentAudio) return;
@@ -170,7 +170,7 @@ function stopAudio() {
     updatePlayIcon(false);
 }
 
-// ── Helpers ─────────────────────────────────────────────────
+// Helpers
 
 function setDownloadLoading(on) {
     downloadBtn.disabled = on;
@@ -218,7 +218,7 @@ function showResult(track) {
 
     resultSection.hidden = false;
 
-    // ── Artist card ──
+    // Artist card
     if (track.artistInfo) {
         artistAvatar.src = track.artistInfo.avatarUrl || '';
         artistAvatar.alt = `${track.artistInfo.name} — avatar`;
