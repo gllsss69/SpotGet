@@ -53,7 +53,6 @@ public class YtDlpDownloadService : IDownloadService
                 "--no-playlist",               // Без плейлистів
                 "--no-warnings",               // Без попереджень
                 "--no-check-certificates",     // Не перевіряти SSL
-                "--extractor-args", "youtube:client=ANDROID_MUSIC,IOS", 
                 "--socket-timeout", "30",      // Таймаут сокету
                 "--retries", "3",              // 3 спроби
                 "-o", $"\"{outputTemplate}\""  // Шлях до файлу
@@ -69,6 +68,7 @@ public class YtDlpDownloadService : IDownloadService
             }
             else
             {
+                argsList.AddRange(new[] { "--extractor-args", "\"youtube:player-client=web_safari,web_embedded,-tv_downgraded\"" });
                 _logger.LogDebug("Cookies файл не знайдено за шляхом {Path}, продовжуємо без нього", cookiesPath);
             }
 
