@@ -43,20 +43,19 @@ public class YtDlpDownloadService : IDownloadService
 
         try
         {
-            // Збираємо аргументи для yt-dlp
+            // Збираємо аргументи для yt-dlp (кожен елемент — окремий аргумент)
             var argsList = new List<string>
             {
-                $"ytsearch1:\"{EscapeArg(searchQuery)}\"",
+                $"ytsearch1:{searchQuery}",
                 "-x",                          // Витягнути тільки аудіо
                 "--audio-format", "mp3",       // Конвертувати в MP3
                 "--audio-quality", "0",        // Найкраща якість
                 "--no-playlist",               // Без плейлистів
-                "--no-warnings",               // Без попереджень
                 "--no-check-certificates",     // Не перевіряти SSL
                 "--js-runtimes", "deno",       // Використовувати Deno для розв'язання EJS/n-sig челенджів
                 "--socket-timeout", "30",      // Таймаут сокету
                 "--retries", "3",              // 3 спроби
-                "-o", $"\"{outputTemplate}\""  // Шлях до файлу
+                "-o", outputTemplate           // Шлях до файлу
             };
 
             // Якщо є cookies файл — додаємо його для обходу блокування YouTube
@@ -64,20 +63,18 @@ public class YtDlpDownloadService : IDownloadService
                               ?? "/app/data/cookies.txt";
             if (File.Exists(cookiesPath) && new FileInfo(cookiesPath).Length > 0)
             {
-                argsList.AddRange(new[] { "--cookies", $"\"{cookiesPath}\"" });
+                argsList.AddRange(new[] { "--cookies", cookiesPath });
                 _logger.LogInformation("Використовуємо cookies файл: {Path}", cookiesPath);
             }
             else
             {
-                argsList.AddRange(new[] { "--extractor-args", "\"youtube:player-client=web_safari,web_embedded,-tv_downgraded\"" });
+                argsList.AddRange(new[] { "--extractor-args", "youtube:player-client=web_safari,web_embedded,-tv_downgraded" });
                 _logger.LogDebug("Cookies файл не знайдено за шляхом {Path}, продовжуємо без нього", cookiesPath);
             }
 
-            var args = string.Join(" ", argsList);
+            _logger.LogInformation("Запускаємо yt-dlp з аргументами: {Args}", string.Join(" ", argsList));
 
-            _logger.LogInformation("Запускаємо yt-dlp з аргументами: {Args}", args);
-
-            var (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", args, timeoutSeconds: 120);
+            var (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
 
             if (exitCode != 0)
             {
@@ -150,18 +147,24 @@ public class YtDlpDownloadService : IDownloadService
     }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
-        string fileName, string arguments, int timeoutSeconds = 60)
+        string fileName, List<string> arguments, int timeoutSeconds = 60)
     {
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
         {
             FileName = fileName,
-            Arguments = arguments,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+
+        // Передаємо кожен аргумент окремо через ArgumentList —
+        // це коректно працює на Linux без проблем з екрануванням
+        foreach (var arg in arguments)
+        {
+            process.StartInfo.ArgumentList.Add(arg);
+        }
 
         process.Start();
 
@@ -185,17 +188,5 @@ public class YtDlpDownloadService : IDownloadService
         var stderr = await stderrTask;
 
         return (process.ExitCode, stdout, stderr);
-    }
-
-    /// <summary>
-    /// Екранує спецсимволи в рядку для безпечного використання в аргументах процесу.
-    /// </summary>
-    private static string EscapeArg(string input)
-    {
-        return input
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("$", "\\$")
-            .Replace("`", "\\`");
     }
 }
