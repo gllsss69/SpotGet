@@ -100,10 +100,15 @@ app.MapPost("/api/download", async (TrackRequest request, ISpotifyService spotif
 .WithName("DownloadTrack")
 .WithDescription("Завантажує MP3 треку за Spotify посиланням.");
 
-app.MapGet("/api/visitors", (HttpContext context, VisitorService visitors) =>
+app.MapGet("/api/visitors", (HttpContext context, string? vid, VisitorService visitors) =>
 {
-    var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    var count = visitors.TrackVisitor(ip);
+    var count = visitors.GetCount();
+
+    // Якщо клієнт передав свій унікальний ID з LocalStorage — реєструємо його
+    if (!string.IsNullOrWhiteSpace(vid))
+    {
+        count = visitors.TrackVisitor(vid);
+    }
 
     // Забороняємо Cloudflare та браузеру кешувати цю відповідь
     context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";

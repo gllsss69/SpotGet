@@ -246,7 +246,15 @@ function formatDuration(ms) {
 // Visitor counter
 (async () => {
     try {
-        const res = await fetch(`/api/visitors?_=${Date.now()}`);
+        // Отримуємо або генеруємо унікальний ID для цього браузера
+        let vid = localStorage.getItem('spotget_vid');
+        if (!vid) {
+            // Генеруємо випадковий ID (fallback для старих браузерів, якщо crypto.randomUUID недоступний)
+            vid = window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'vid_' + Date.now().toString(36) + Math.random().toString(36).substring(2);
+            localStorage.setItem('spotget_vid', vid);
+        }
+
+        const res = await fetch(`/api/visitors?vid=${vid}&_=${Date.now()}`);
         const data = await res.json();
         const el = document.getElementById('visitorCount');
         if (el && data.count !== undefined) {
