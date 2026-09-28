@@ -104,6 +104,11 @@ app.MapGet("/api/visitors", (HttpContext context, VisitorService visitors) =>
 {
     var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     var count = visitors.TrackVisitor(ip);
+
+    // Забороняємо Cloudflare та браузеру кешувати цю відповідь
+    context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+    context.Response.Headers.Pragma = "no-cache";
+
     return Results.Ok(new { count });
 })
 .WithName("GetVisitorCount")

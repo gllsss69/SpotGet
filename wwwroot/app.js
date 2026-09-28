@@ -246,7 +246,7 @@ function formatDuration(ms) {
 // Visitor counter
 (async () => {
     try {
-        const res = await fetch('/api/visitors');
+        const res = await fetch(`/api/visitors?_=${Date.now()}`);
         const data = await res.json();
         const el = document.getElementById('visitorCount');
         if (el && data.count !== undefined) {
