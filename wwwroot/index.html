@@ -60,6 +60,42 @@
             color: #121212;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
+
+        .visitor-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: var(--font-family);
+            padding: 4px 10px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: all 0.3s ease;
+            cursor: default;
+        }
+
+        .visitor-badge:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .visitor-count {
+            font-variant-numeric: tabular-nums;
+            min-width: 12px;
+            text-align: center;
+        }
+
+        .visitor-count.animate {
+            animation: countPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        @keyframes countPop {
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
     </style>
 </head>
 
@@ -67,6 +103,13 @@
     <div class="bg-glow"></div>
 
     <div class="top-right-actions">
+        <div class="visitor-badge" title="Unique visitors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <span class="visitor-count" id="visitorCount">—</span>
+        </div>
         <a href="https://github.com/gllsss69/SpotGet" target="_blank" rel="noopener" class="github-link"
             title="View on GitHub">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">

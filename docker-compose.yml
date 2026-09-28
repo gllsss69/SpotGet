@@ -3,4 +3,9 @@ services:
     build: .
     ports:
       - "80:8080"
+    volumes:
+      - visitor-data:/app/data
     restart: unless-stopped
+
+volumes:
+  visitor-data:

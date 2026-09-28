@@ -242,3 +242,18 @@ function formatDuration(ms) {
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
+
+// Visitor counter
+(async () => {
+    try {
+        const res = await fetch('/api/visitors');
+        const data = await res.json();
+        const el = document.getElementById('visitorCount');
+        if (el && data.count !== undefined) {
+            el.textContent = data.count.toLocaleString();
+            el.classList.add('animate');
+        }
+    } catch {
+        // Silently ignore — badge will stay with "—"
+    }
+})();

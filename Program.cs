@@ -14,6 +14,9 @@ builder.Services.AddHttpClient<IDownloadService, YoutubeDownloadService>();
 // Черга завантажень (макс. 3 одночасних завантаження з YouTube)
 builder.Services.AddSingleton(new DownloadQueue(maxConcurrent: 3));
 
+// Лічильник унікальних відвідувачів
+builder.Services.AddSingleton<VisitorService>();
+
 // Rate Limiter (обмеження запитів за IP)
 builder.Services.AddRateLimiter(options =>
 {
@@ -96,5 +99,14 @@ app.MapPost("/api/download", async (TrackRequest request, ISpotifyService spotif
 })
 .WithName("DownloadTrack")
 .WithDescription("Завантажує MP3 треку за Spotify посиланням.");
+
+app.MapGet("/api/visitors", (HttpContext context, VisitorService visitors) =>
+{
+    var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var count = visitors.TrackVisitor(ip);
+    return Results.Ok(new { count });
+})
+.WithName("GetVisitorCount")
+.WithDescription("Повертає кількість унікальних відвідувачів сайту.");
 
 app.Run();
