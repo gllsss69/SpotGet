@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="SpotGet — download metadata and audio from Spotify by link" />
+    <title>SpotGet — Spotify Track Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <div class="bg-glow"></div>
+
+    <main class="container">
+        <header class="hero">
+            <div class="logo">
+                <h1>SpotGet</h1>
+            </div>
+            <p class="subtitle">Paste a Spotify track link and get all the details</p>
+        </header>
+
+        <section class="search-section">
+            <form id="trackForm" class="search-bar">
+                <div class="input-wrapper">
+                    <svg class="input-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    </svg>
+                    <input type="url" id="spotifyUrl" placeholder="https://open.spotify.com/track/..."
+                        autocomplete="off" required />
+                    <button type="button" id="pasteBtn" class="paste-btn" title="Paste from clipboard">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        Paste
+                    </button>
+                </div>
+                <button type="submit" id="submitBtn" class="submit-btn">
+                    <span class="btn-text">Get Track Info</span>
+                    <span class="btn-loader" hidden>
+                        <svg class="spinner" width="20" height="20" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none"
+                                stroke-dasharray="30 70" stroke-linecap="round" />
+                        </svg>
+                    </span>
+                </button>
+            </form>
+        </section>
+
+        <section id="errorSection" class="error-card" hidden>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="15" y1="9" x2="9" y2="15" />
+                <line x1="9" y1="9" x2="15" y2="15" />
+            </svg>
+            <span id="errorMessage"></span>
+        </section>
+
+        <section id="resultSection" class="result-card" hidden>
+            <div class="result-cover">
+                <img id="coverImg" alt="Album cover" />
+                <div class="cover-overlay">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="white">
+                        <polygon points="5,3 19,12 5,21" />
+                    </svg>
+                </div>
+                <div class="preview-progress" id="previewProgress"></div>
+            </div>
+            <div class="result-info">
+                <h2 id="trackTitle" class="track-title"></h2>
+                <p id="trackArtist" class="track-artist"></p>
+                <div class="meta-row">
+                    <span class="meta-badge" id="trackAlbum"></span>
+                    <span class="meta-badge" id="trackDuration"></span>
+                </div>
+                <div class="actions-row">
+                    <button id="downloadBtn" class="download-mp3-btn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        <span class="dl-text">Download MP3</span>
+                        <span class="dl-loader" hidden>
+                            <svg class="spinner" width="18" height="18" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none"
+                                    stroke-dasharray="30 70" stroke-linecap="round" />
+                            </svg>
+                        </span>
+                    </button>
+                    <a id="trackLink" class="spotify-link" href="#" target="_blank" rel="noopener">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+                        </svg>
+                        Open in Spotify
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <section id="artistSection" class="artist-card" hidden>
+            <div class="artist-avatar-wrap">
+                <img id="artistAvatar" class="artist-avatar" alt="Artist avatar" />
+            </div>
+            <div class="artist-info">
+                <h3 id="artistName" class="artist-name"></h3>
+                <p id="artistDescription" class="artist-desc"></p>
+                <a id="artistLink" class="spotify-link" href="#" target="_blank" rel="noopener">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+                    </svg>
+                    Artist Profile
+                </a>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>SpotGet &copy; 2026 &mdash; made with ❤️</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
