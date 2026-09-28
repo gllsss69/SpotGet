@@ -53,6 +53,7 @@ public class YtDlpDownloadService : IDownloadService
                 "--no-playlist",               // Без плейлистів
                 "--no-warnings",               // Без попереджень
                 "--no-check-certificates",     // Не перевіряти SSL
+                "--js-runtimes", "deno",       // Використовувати Deno для розв'язання EJS/n-sig челенджів
                 "--socket-timeout", "30",      // Таймаут сокету
                 "--retries", "3",              // 3 спроби
                 "-o", $"\"{outputTemplate}\""  // Шлях до файлу
@@ -61,7 +62,7 @@ public class YtDlpDownloadService : IDownloadService
             // Якщо є cookies файл — додаємо його для обходу блокування YouTube
             var cookiesPath = Environment.GetEnvironmentVariable("YTDLP_COOKIES_PATH")
                               ?? "/app/data/cookies.txt";
-            if (File.Exists(cookiesPath))
+            if (File.Exists(cookiesPath) && new FileInfo(cookiesPath).Length > 0)
             {
                 argsList.AddRange(new[] { "--cookies", $"\"{cookiesPath}\"" });
                 _logger.LogInformation("Використовуємо cookies файл: {Path}", cookiesPath);
