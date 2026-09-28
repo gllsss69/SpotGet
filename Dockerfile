@@ -13,8 +13,12 @@ RUN dotnet publish "SpotGet.csproj" -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 
-# Встановлюємо FFmpeg (необхідний для конвертації аудіо з YouTube)
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Встановлюємо FFmpeg, Python3 та yt-dlp (необхідні для завантаження та конвертації аудіо з YouTube)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg python3 curl ca-certificates && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+    chmod a+rx /usr/local/bin/yt-dlp && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/publish .
 

@@ -9,7 +9,7 @@ builder.Services.AddMemoryCache();
 
 // HTTP-клієнти для SpotifyService та DownloadService
 builder.Services.AddHttpClient<ISpotifyService, SpotifyService>();
-builder.Services.AddHttpClient<IDownloadService, YoutubeDownloadService>();
+builder.Services.AddHttpClient<IDownloadService, YtDlpDownloadService>();
 
 // Черга завантажень (макс. 3 одночасних завантаження з YouTube)
 builder.Services.AddSingleton(new DownloadQueue(maxConcurrent: 3));
