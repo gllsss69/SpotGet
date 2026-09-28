@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/publish .
 
+# Створюємо директорію для даних відвідувачів з правами для непривілейованого користувача
+RUN mkdir -p /app/data && chmod 777 /app/data
+
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 
