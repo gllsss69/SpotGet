@@ -43,8 +43,8 @@ public class YtDlpDownloadService : IDownloadService
 
         try
         {
-            // Завантажуємо аудіо з YouTube через yt-dlp
-            var args = string.Join(" ", new[]
+            // Збираємо аргументи для yt-dlp
+            var argsList = new List<string>
             {
                 $"ytsearch1:\"{EscapeArg(searchQuery)}\"",
                 "-x",                          // Витягнути тільки аудіо
@@ -53,10 +53,13 @@ public class YtDlpDownloadService : IDownloadService
                 "--no-playlist",               // Без плейлистів
                 "--no-warnings",               // Без попереджень
                 "--no-check-certificates",     // Не перевіряти SSL
+                "--extractor-args", "youtube:client=ANDROID_MUSIC,IOS", // Обхід блокувань YouTube без cookies
                 "--socket-timeout", "30",      // Таймаут сокету
                 "--retries", "3",              // 3 спроби
                 "-o", $"\"{outputTemplate}\""  // Шлях до файлу
-            });
+            };
+
+            var args = string.Join(" ", argsList);
 
             _logger.LogInformation("Запускаємо yt-dlp з аргументами: {Args}", args);
 
