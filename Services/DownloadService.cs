@@ -53,11 +53,24 @@ public class YtDlpDownloadService : IDownloadService
                 "--no-playlist",               // Без плейлистів
                 "--no-warnings",               // Без попереджень
                 "--no-check-certificates",     // Не перевіряти SSL
-                "--extractor-args", "youtube:client=ANDROID_MUSIC,IOS", // Обхід блокувань YouTube без cookies
+                "--extractor-args", "youtube:client=ANDROID_MUSIC,IOS", 
                 "--socket-timeout", "30",      // Таймаут сокету
                 "--retries", "3",              // 3 спроби
                 "-o", $"\"{outputTemplate}\""  // Шлях до файлу
             };
+
+            // Якщо є cookies файл — додаємо його для обходу блокування YouTube
+            var cookiesPath = Environment.GetEnvironmentVariable("YTDLP_COOKIES_PATH")
+                              ?? "/app/data/cookies.txt";
+            if (File.Exists(cookiesPath))
+            {
+                argsList.AddRange(new[] { "--cookies", $"\"{cookiesPath}\"" });
+                _logger.LogInformation("Використовуємо cookies файл: {Path}", cookiesPath);
+            }
+            else
+            {
+                _logger.LogDebug("Cookies файл не знайдено за шляхом {Path}, продовжуємо без нього", cookiesPath);
+            }
 
             var args = string.Join(" ", argsList);
 

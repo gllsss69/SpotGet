@@ -5,6 +5,7 @@ services:
       - "80:8080"
     volumes:
       - visitor-data:/app/data
+      - ./cookies.txt:/app/data/cookies.txt:ro
     restart: unless-stopped
 
 volumes:
