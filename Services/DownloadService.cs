@@ -31,7 +31,7 @@ public class YtDlpDownloadService : IDownloadService
 
     public async Task<string> DownloadAndTagTrackAsync(SpotTrackDto track)
     {
-        var searchQuery = $"{track.Artist} - {track.Title} audio";
+        var searchQuery = $"{track.Artist} - {track.Title}";
         _logger.LogInformation("Шукаємо на YouTube через yt-dlp: {Query}", searchQuery);
 
         // Створюємо тимчасову директорію для завантаження
