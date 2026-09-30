@@ -11,6 +11,8 @@ public class SpotTrackDto
     public string? CoverUrl { get; set; }
     public string? PreviewUrl { get; set; }
     public int DurationMs { get; set; }
+    public uint TrackNumber { get; set; }
+    public uint TrackCount { get; set; }
     public string SpotifyUrl { get; set; } = string.Empty;
     public SpotArtistDto? ArtistInfo { get; set; }
 }
