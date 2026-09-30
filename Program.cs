@@ -47,6 +47,16 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseRateLimiter();
 
+// HTTP Security Headers
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
+    context.Response.Headers.Append("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; media-src 'self' https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'");
+    await next();
+});
+
 // Статичні файли з wwwroot (HTML/JS/CSS для фронтенду).
 app.UseDefaultFiles();  // index.html як дефолтний документ
 app.UseStaticFiles();
@@ -55,8 +65,8 @@ app.UseStaticFiles();
 
 app.MapPost("/api/track-info", async (TrackRequest request, ISpotifyService spotify) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Url))
-        return Results.BadRequest(new { error = "Поле 'url' не може бути порожнім." });
+    if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
+        return Results.BadRequest(new { error = "Поле 'url' не може бути порожнім або занадто довгим." });
 
     try
     {
@@ -81,8 +91,8 @@ app.MapPost("/api/track-info", async (TrackRequest request, ISpotifyService spot
 
 app.MapPost("/api/download", async (TrackRequest request, ISpotifyService spotify, IDownloadService downloader, DownloadQueue queue) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Url))
-        return Results.BadRequest(new { error = "Поле 'url' не може бути порожнім." });
+    if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
+        return Results.BadRequest(new { error = "Поле 'url' не може бути порожнім або занадто довгим." });
 
     try
     {

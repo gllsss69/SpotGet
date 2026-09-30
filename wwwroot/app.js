@@ -105,10 +105,15 @@ downloadBtn.addEventListener('click', async () => {
 
         let filename = `${trackArtist.textContent} - ${trackTitle.textContent}.mp3`;
         const disposition = response.headers.get('Content-Disposition');
-        if (disposition && disposition.indexOf('filename=') !== -1) {
-            const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-            if (match && match[1]) {
-                filename = decodeURIComponent(match[1].replace(/['"]/g, ''));
+        if (disposition) {
+            const utf8Match = disposition.match(/filename\*=UTF-8''([^;\n]*)/i);
+            if (utf8Match && utf8Match[1]) {
+                filename = decodeURIComponent(utf8Match[1]);
+            } else {
+                const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                if (match && match[1]) {
+                    filename = decodeURIComponent(match[1].replace(/['"]/g, ''));
+                }
             }
         }
 
