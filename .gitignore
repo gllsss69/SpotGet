@@ -480,3 +480,9 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# SpotGet specific ignores
+cookies.txt
+data/
+*.cookies
+
