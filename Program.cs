@@ -100,7 +100,7 @@ app.MapPost("/api/download", async (TrackRequest request, ISpotifyService spotif
         var filePath = await queue.EnqueueAsync(() => downloader.DownloadAndTagTrackAsync(track));
         
         var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.DeleteOnClose);
-        return Results.File(stream, "audio/mpeg", $"{track.Artist} - {track.Title}.mp3");
+        return Results.File(stream, "audio/mpeg");
     }
     catch (Exception ex)
     {
