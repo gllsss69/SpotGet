@@ -166,29 +166,13 @@ public class YtDlpDownloadService : IDownloadService
     /// </summary>
     private async Task<string?> FindBestYoutubeMatchAsync(string searchQuery, SpotTrackDto track, string? cookiesPath)
     {
-        var args = new List<string>
-        {
-            "--flat-playlist",
-            "--dump-single-json",
-            "--skip-download",
-            "--playlist-end", "5",
-            "--no-check-certificates",     // Не перевіряти SSL
-            "--js-runtimes", "deno",       // Використовувати Deno для розв'язання EJS/n-sig челенджів
-            "--extractor-args", "youtube:player-client=android,mweb,web_safari,web_embedded", // Оптимальні клієнти для обходу блокувань
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "--socket-timeout", "30",      // Таймаут сокету
-            "--retries", "3",              // 3 спроби
-            $"ytsearch5:{searchQuery}"
-        };
-
-        if (cookiesPath != null)
-            args.AddRange(new[] { "--cookies", cookiesPath });
+        var args = BuildYtDlpSearchArgs(searchQuery, cookiesPath);
 
         var (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", args, timeoutSeconds: 120);
         if (exitCode != 0 && cookiesPath is not null && IsCookieRelatedError(stderr))
         {
             _logger.LogWarning("Не вдалося шукати з cookies; повторюємо без них. stderr: {Stderr}", stderr);
-            args.RemoveRange(args.Count - 2, 2);
+            args = BuildYtDlpSearchArgs(searchQuery, cookiesPath: null);
             (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", args, timeoutSeconds: 120);
         }
 
@@ -277,6 +261,29 @@ public class YtDlpDownloadService : IDownloadService
         }
     }
 
+    private static List<string> BuildYtDlpSearchArgs(string searchQuery, string? cookiesPath)
+    {
+        var args = new List<string>
+        {
+            "--flat-playlist",
+            "--dump-single-json",
+            "--skip-download",
+            "--playlist-end", "5",
+            "--no-check-certificates",
+            "--js-runtimes", "deno",
+            "--extractor-args", GetYoutubeExtractorArgs(cookiesPath),
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "--socket-timeout", "30",
+            "--retries", "3",
+            $"ytsearch5:{searchQuery}"
+        };
+
+        if (cookiesPath is not null)
+            args.AddRange(new[] { "--cookies", cookiesPath });
+
+        return args;
+    }
+
     private static string? GetString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
@@ -296,7 +303,7 @@ public class YtDlpDownloadService : IDownloadService
             "--no-playlist",               // Без плейлистів
             "--no-check-certificates",     // Не перевіряти SSL
             "--js-runtimes", "deno",       // Використовувати Deno для розв'язання EJS/n-sig челенджів
-            "--extractor-args", "youtube:player-client=android,mweb,web_safari,web_embedded",
+            "--extractor-args", GetYoutubeExtractorArgs(cookiesPath),
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "--socket-timeout", "30",
             "--retries", "3",
@@ -316,9 +323,13 @@ public class YtDlpDownloadService : IDownloadService
     {
         return stderr.Contains("cookies are no longer valid", StringComparison.OrdinalIgnoreCase) ||
                stderr.Contains("cookies have been rotated", StringComparison.OrdinalIgnoreCase) ||
-               stderr.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase) ||
-               stderr.Contains("cookie", StringComparison.OrdinalIgnoreCase);
+               stderr.Contains("cookie has expired", StringComparison.OrdinalIgnoreCase) ||
+               stderr.Contains("cookies have expired", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string GetYoutubeExtractorArgs(string? cookiesPath) => cookiesPath is null
+        ? "youtube:player-client=android,mweb,web_safari,web_embedded"
+        : "youtube:player-client=mweb,web_safari,web_embedded";
 
     private async Task AddTagsAsync(string filePath, SpotTrackDto track)
     {
