@@ -43,43 +43,46 @@ public class YtDlpDownloadService : IDownloadService
 
         try
         {
-            // Збираємо аргументи для yt-dlp (кожен елемент — окремий аргумент)
-            var argsList = new List<string>
-            {
-                $"ytsearch1:{searchQuery}",
-                "-x",                          // Витягнути тільки аудіо
-                "--audio-format", "mp3",       // Конвертувати в MP3
-                "--audio-quality", "0",        // Найкраща якість
-                "--no-playlist",               // Без плейлистів
-                "--no-check-certificates",     // Не перевіряти SSL
-                "--js-runtimes", "deno",       // Використовувати Deno для розв'язання EJS/n-sig челенджів
-                "--socket-timeout", "30",      // Таймаут сокету
-                "--retries", "3",              // 3 спроби
-                "-o", outputTemplate           // Шлях до файлу
-            };
-
-            // Якщо є cookies файл — додаємо його для обходу блокування YouTube
             var cookiesPath = Environment.GetEnvironmentVariable("YTDLP_COOKIES_PATH")
                               ?? "/app/data/cookies.txt";
-            if (File.Exists(cookiesPath) && new FileInfo(cookiesPath).Length > 0)
-            {
-                argsList.AddRange(new[] { "--cookies", cookiesPath });
-                _logger.LogInformation("Використовуємо cookies файл: {Path}", cookiesPath);
-            }
-            else
-            {
-                argsList.AddRange(new[] { "--extractor-args", "youtube:player-client=web_safari,web_embedded,-tv_downgraded" });
-                _logger.LogDebug("Cookies файл не знайдено за шляхом {Path}, продовжуємо без нього", cookiesPath);
-            }
+            var hasCookies = File.Exists(cookiesPath) && new FileInfo(cookiesPath).Length > 0;
 
-            _logger.LogInformation("Запускаємо yt-dlp з аргументами: {Args}", string.Join(" ", argsList));
+            // Спроба 1: з cookies (якщо є) або з extractor-args (якщо немає)
+            var argsList = BuildYtDlpArgs(searchQuery, outputTemplate, hasCookies ? cookiesPath : null);
+
+            _logger.LogInformation("Запускаємо yt-dlp (спроба 1, cookies={HasCookies}): {Args}",
+                hasCookies, string.Join(" ", argsList));
 
             var (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
+
+            // Якщо не вдалось з cookies — спробувати без них
+            if (exitCode != 0 && hasCookies && IsCookieRelatedError(stderr))
+            {
+                _logger.LogWarning("Cookies протухли або недійсні. Повторюємо без cookies. stderr: {Stderr}", stderr);
+
+                // Очищаємо тимчасову директорію перед повторною спробою
+                foreach (var f in Directory.GetFiles(tempDir)) File.Delete(f);
+
+                argsList = BuildYtDlpArgs(searchQuery, outputTemplate, cookiesPath: null);
+
+                _logger.LogInformation("Запускаємо yt-dlp (спроба 2, без cookies): {Args}",
+                    string.Join(" ", argsList));
+
+                (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
+            }
 
             if (exitCode != 0)
             {
                 _logger.LogError("yt-dlp завершився з кодом {ExitCode}. stderr: {Stderr}", exitCode, stderr);
-                throw new Exception($"Не вдалося завантажити трек. yt-dlp повернув код {exitCode}: {stderr}");
+
+                // Формуємо зрозуміле повідомлення для користувача
+                if (stderr.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+                    throw new Exception("YouTube тимчасово блокує завантаження з цього сервера. Спробуйте пізніше або зверніться до адміністратора для оновлення cookies.");
+                if (stderr.Contains("No video results", StringComparison.OrdinalIgnoreCase) ||
+                    stderr.Contains("no results", StringComparison.OrdinalIgnoreCase))
+                    throw new Exception($"Не вдалося знайти трек \"{track.Artist} - {track.Title}\" на YouTube.");
+
+                throw new Exception($"Не вдалося завантажити трек. Помилка yt-dlp (код {exitCode}).");
             }
 
             // Перевіряємо чи файл створився
@@ -110,6 +113,48 @@ public class YtDlpDownloadService : IDownloadService
             try { Directory.Delete(tempDir, true); } catch { /* ignore */ }
             throw;
         }
+    }
+
+    /// <summary>
+    /// Збирає аргументи для yt-dlp. Якщо cookiesPath == null, використовує extractor-args як фолбек.
+    /// </summary>
+    private static List<string> BuildYtDlpArgs(string searchQuery, string outputTemplate, string? cookiesPath)
+    {
+        var args = new List<string>
+        {
+            $"ytsearch1:{searchQuery}",
+            "-x",                          // Витягнути тільки аудіо
+            "--audio-format", "mp3",       // Конвертувати в MP3
+            "--audio-quality", "0",        // Найкраща якість
+            "--no-playlist",               // Без плейлистів
+            "--no-check-certificates",     // Не перевіряти SSL
+            "--js-runtimes", "deno",       // Використовувати Deno для розв'язання EJS/n-sig челенджів
+            "--socket-timeout", "30",      // Таймаут сокету
+            "--retries", "3",              // 3 спроби
+            "-o", outputTemplate           // Шлях до файлу
+        };
+
+        if (cookiesPath != null)
+        {
+            args.AddRange(new[] { "--cookies", cookiesPath });
+        }
+        else
+        {
+            args.AddRange(new[] { "--extractor-args", "youtube:player-client=web_safari,web_embedded,-tv_downgraded" });
+        }
+
+        return args;
+    }
+
+    /// <summary>
+    /// Перевіряє, чи помилка пов'язана з протухлими/недійсними cookies.
+    /// </summary>
+    private static bool IsCookieRelatedError(string stderr)
+    {
+        return stderr.Contains("cookies are no longer valid", StringComparison.OrdinalIgnoreCase) ||
+               stderr.Contains("cookies have been rotated", StringComparison.OrdinalIgnoreCase) ||
+               stderr.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase) ||
+               stderr.Contains("cookie", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task AddTagsAsync(string filePath, SpotTrackDto track)
