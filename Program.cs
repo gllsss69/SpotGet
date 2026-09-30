@@ -162,15 +162,36 @@ app.MapPost("/api/download-collection", async (TrackRequest request, HttpContext
         var failedTracks = new List<string>();
         var downloadedTracks = 0;
 
+        // Download tracks concurrently; DownloadQueue enforces the global concurrency limit.
+        var downloadResults = await Task.WhenAll(collection.Tracks.Select(async (track, index) =>
+        {
+            try
+            {
+                var trackPath = await queue.EnqueueAsync(() => downloader.DownloadAndTagTrackAsync(track));
+                return (TrackPath: (string?)trackPath, Failure: (string?)null);
+            }
+            catch (Exception ex)
+            {
+                var failure = $"{index + 1:00}. {track.Artist} - {track.Title}: {ex.Message}";
+                logger.LogWarning(ex, "Не вдалося завантажити трек {TrackNumber}: {Title}", index + 1, track.Title);
+                return (TrackPath: (string?)null, Failure: failure);
+            }
+        }));
+
         using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
             for (var i = 0; i < collection.Tracks.Count; i++)
             {
                 var track = collection.Tracks[i];
-                string? trackPath = null;
+                var trackPath = downloadResults[i].TrackPath;
+                if (trackPath is null)
+                {
+                    failedTracks.Add(downloadResults[i].Failure!);
+                    continue;
+                }
+
                 try
                 {
-                    trackPath = await queue.EnqueueAsync(() => downloader.DownloadAndTagTrackAsync(track));
                     var entryName = $"{i + 1:00} - {SafeFilePart(track.Artist)} - {SafeFilePart(track.Title)}.mp3";
                     var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
                     await using var source = File.OpenRead(trackPath);
@@ -182,13 +203,13 @@ app.MapPost("/api/download-collection", async (TrackRequest request, HttpContext
                 {
                     var failure = $"{i + 1:00}. {track.Artist} - {track.Title}: {ex.Message}";
                     failedTracks.Add(failure);
-                    logger.LogWarning(ex, "Пропускаємо трек {TrackNumber}: {Title}; продовжуємо колекцію", i + 1, track.Title);
+                    logger.LogWarning(ex, "Не вдалося додати трек {TrackNumber} до ZIP: {Title}", i + 1, track.Title);
                 }
                 finally
                 {
                     try
                     {
-                        var trackDir = trackPath is null ? null : Path.GetDirectoryName(trackPath);
+                        var trackDir = Path.GetDirectoryName(trackPath);
                         if (trackDir is not null && Path.GetFileName(trackDir).StartsWith("spotget_", StringComparison.Ordinal))
                             Directory.Delete(trackDir, recursive: true);
                     }
