@@ -17,6 +17,13 @@ builder.Services.AddSingleton(new DownloadQueue(maxConcurrent: 3));
 // Лічильник унікальних відвідувачів
 builder.Services.AddSingleton<VisitorService>();
 
+// Фоновий сервіс для очищення тимчасових файлів spotget_*
+builder.Services.AddHostedService<TempFileCleanupService>();
+
+// Перевірка здоров'я системи (yt-dlp, ffmpeg, дисковий простір)
+builder.Services.AddHealthChecks()
+    .AddCheck<SystemHealthCheck>("system_health");
+
 // Rate Limiter (обмеження запитів за IP)
 builder.Services.AddRateLimiter(options =>
 {
@@ -128,5 +135,8 @@ app.MapGet("/api/visitors", (HttpContext context, string? vid, VisitorService vi
 })
 .WithName("GetVisitorCount")
 .WithDescription("Повертає кількість унікальних відвідувачів сайту.");
+
+// Ендпоінт для перевірки стану застосунку та залежностей (Docker Healthcheck)
+app.MapHealthChecks("/health");
 
 app.Run();

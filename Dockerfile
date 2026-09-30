@@ -13,7 +13,7 @@ RUN dotnet publish "SpotGet.csproj" -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 
-# Встановлюємо FFmpeg, Python3 та yt-dlp (необхідні для завантаження та конвертації аудіо з YouTube)
+# Встановлюємо FFmpeg, Python3, curl, deno та yt-dlp
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg python3 curl ca-certificates unzip && \
     curl -fsSL https://deno.land/install.sh | sh -s -- -y && \
@@ -22,15 +22,29 @@ RUN apt-get update && \
     chmod a+rx /usr/local/bin/yt-dlp && \
     rm -rf /var/lib/apt/lists/*
 
+# Створюємо непривілейованого користувача (UID 10001) для підвищеної безпеки
+RUN useradd -u 10001 -m appuser
+
+# Копіюємо зібраний проєкт
 COPY --from=build /app/publish .
 
-# Створюємо директорію для даних відвідувачів з правами для непривілейованого користувача
-RUN mkdir -p /app/data && chmod 777 /app/data
+# Створюємо необхідні директорії та надаємо права користувачу appuser
+RUN mkdir -p /app/data /tmp/deno-cache /tmp/cache && \
+    chown -R appuser:appuser /app /tmp/deno-cache /tmp/cache
 
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 ENV PYTHONUTF8=1
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
+ENV DENO_DIR=/tmp/deno-cache
+ENV XDG_CACHE_HOME=/tmp/cache
+
+# Переключаємося на непривілейованого користувача
+USER 10001
+
+# Health Check перевіряє стан сервісу кожні 30 секунд
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["dotnet", "SpotGet.dll"]
