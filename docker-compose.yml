@@ -6,7 +6,7 @@ services:
       - "80:8080"
     volumes:
       - visitor-data:/app/data
-      - ./cookies.txt:/app/data/cookies.txt:ro
+      - ./cookies.txt:/app/data/cookies.txt
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]

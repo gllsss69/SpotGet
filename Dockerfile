@@ -22,15 +22,12 @@ RUN apt-get update && \
     chmod a+rx /usr/local/bin/yt-dlp && \
     rm -rf /var/lib/apt/lists/*
 
-# Створюємо непривілейованого користувача (UID 10001) для підвищеної безпеки
-RUN useradd -u 10001 -m appuser
-
 # Копіюємо зібраний проєкт
 COPY --from=build /app/publish .
 
-# Створюємо необхідні директорії та надаємо права користувачу appuser
+# Створюємо необхідні директорії з повними правами на запис для сумісності з mounted volumes
 RUN mkdir -p /app/data /tmp/deno-cache /tmp/cache && \
-    chown -R appuser:appuser /app /tmp/deno-cache /tmp/cache
+    chmod 777 /app/data /tmp/deno-cache /tmp/cache
 
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
@@ -39,9 +36,6 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV DENO_DIR=/tmp/deno-cache
 ENV XDG_CACHE_HOME=/tmp/cache
-
-# Переключаємося на непривілейованого користувача
-USER 10001
 
 # Health Check перевіряє стан сервісу кожні 30 секунд
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
