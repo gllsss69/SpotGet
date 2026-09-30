@@ -45,9 +45,13 @@ public class YtDlpDownloadService : IDownloadService
         {
             var cookiesPath = Environment.GetEnvironmentVariable("YTDLP_COOKIES_PATH")
                               ?? "/app/data/cookies.txt";
-            var hasCookies = File.Exists(cookiesPath) && new FileInfo(cookiesPath).Length > 0;
 
-            // Спроба 1: з cookies (якщо є) або з extractor-args (якщо немає)
+            // Перевіряємо, що шлях існує і це файл (а не папку, яку міг створити Docker) та файл не порожній
+            var hasCookies = File.Exists(cookiesPath) 
+                             && !Directory.Exists(cookiesPath) 
+                             && new FileInfo(cookiesPath).Length > 0;
+
+            // Спроба 1: з cookies (якщо є) або з розширеними extractor-args
             var argsList = BuildYtDlpArgs(searchQuery, outputTemplate, hasCookies ? cookiesPath : null);
 
             _logger.LogInformation("Запускаємо yt-dlp (спроба 1, cookies={HasCookies}): {Args}",
@@ -116,7 +120,7 @@ public class YtDlpDownloadService : IDownloadService
     }
 
     /// <summary>
-    /// Збирає аргументи для yt-dlp. Якщо cookiesPath == null, використовує extractor-args як фолбек.
+    /// Збирає аргументи для yt-dlp. Використовує оптимальні player-client (mweb, android, web) для уникнення блокувань.
     /// </summary>
     private static List<string> BuildYtDlpArgs(string searchQuery, string outputTemplate, string? cookiesPath)
     {
@@ -129,6 +133,8 @@ public class YtDlpDownloadService : IDownloadService
             "--no-playlist",               // Без плейлистів
             "--no-check-certificates",     // Не перевіряти SSL
             "--js-runtimes", "deno",       // Використовувати Deno для розв'язання EJS/n-sig челенджів
+            "--extractor-args", "youtube:player-client=android,mweb,web_safari,web_embedded", // Оптимальні клієнти для обходу блокувань
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "--socket-timeout", "30",      // Таймаут сокету
             "--retries", "3",              // 3 спроби
             "-o", outputTemplate           // Шлях до файлу
@@ -137,10 +143,6 @@ public class YtDlpDownloadService : IDownloadService
         if (cookiesPath != null)
         {
             args.AddRange(new[] { "--cookies", cookiesPath });
-        }
-        else
-        {
-            args.AddRange(new[] { "--extractor-args", "youtube:player-client=web_safari,web_embedded,-tv_downgraded" });
         }
 
         return args;
