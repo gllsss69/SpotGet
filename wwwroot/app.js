@@ -23,6 +23,7 @@ const dlText = downloadBtn.querySelector('.dl-text');
 const dlLoader = downloadBtn.querySelector('.dl-loader');
 
 const resultCover = document.querySelector('.result-cover');
+const downloadCoverBtn = document.getElementById('downloadCoverBtn');
 const coverOverlay = document.querySelector('.cover-overlay');
 const previewProgress = document.getElementById('previewProgress');
 
@@ -131,6 +132,34 @@ downloadBtn.addEventListener('click', async () => {
         showError(translations[currentLang].errDlGeneric);
     } finally {
         setDownloadLoading(false);
+    }
+});
+
+// Download Cover Image button
+downloadCoverBtn.addEventListener('click', async (e) => {
+    e.stopPropagation(); // Зупиняємо розповсюдження події, щоб не вмикати аудіопрев'ю
+
+    const src = coverImg.src;
+    if (!src) return;
+
+    try {
+        const response = await fetch(src);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        const fileName = `${trackArtist.textContent || 'Artist'} - ${trackTitle.textContent || 'Track'} (Cover).jpg`;
+
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = blobUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(blobUrl);
+    } catch {
+        // Фолбек: якщо CORS блокує пряме завантаження через blob, відкриваємо картинку в новій вкладці
+        window.open(src, '_blank');
     }
 });
 
