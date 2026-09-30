@@ -156,8 +156,14 @@ public class YtDlpDownloadService : IDownloadService
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8
         };
+
+        process.StartInfo.EnvironmentVariables["PYTHONUTF8"] = "1";
+        process.StartInfo.EnvironmentVariables["LANG"] = "C.UTF-8";
+        process.StartInfo.EnvironmentVariables["LC_ALL"] = "C.UTF-8";
 
         // Передаємо кожен аргумент окремо через ArgumentList —
         // це коректно працює на Linux без проблем з екрануванням

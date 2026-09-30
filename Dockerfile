@@ -29,5 +29,8 @@ RUN mkdir -p /app/data && chmod 777 /app/data
 
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
+ENV PYTHONUTF8=1
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 ENTRYPOINT ["dotnet", "SpotGet.dll"]
