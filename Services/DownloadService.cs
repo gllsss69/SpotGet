@@ -52,53 +52,59 @@ public class YtDlpDownloadService : IDownloadService
                              && new FileInfo(cookiesPath).Length > 0;
             var downloadCookiesPath = hasCookies ? cookiesPath : null;
 
-            // Переглядаємо кілька результатів і беремо той, чия довжина ближча до Spotify.
-            var videoUrl = await FindBestYoutubeMatchAsync(searchQuery, track, hasCookies ? cookiesPath : null);
-            var argsList = BuildYtDlpArgs(videoUrl ?? $"ytsearch1:{searchQuery}", outputTemplate, downloadCookiesPath);
+            // Try candidates in duration order. A failed video should not stop the track download.
+            var candidateUrls = await FindYoutubeMatchesAsync(searchQuery, track, downloadCookiesPath);
+            if (candidateUrls.Count == 0)
+                candidateUrls.Add($"ytsearch1:{searchQuery}");
 
-            _logger.LogInformation("Завантажуємо вибране відео (cookies={HasCookies}): {Args}",
-                hasCookies, string.Join(" ", argsList));
-
-            var (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
-
-            // Якщо не вдалось з cookies — спробувати без них
-            if (exitCode != 0 && hasCookies && IsCookieRelatedError(stderr))
+            async Task<(int ExitCode, string Stdout, string Stderr)> DownloadCandidateAsync(string videoUrl)
             {
-                _logger.LogWarning("Cookies протухли або недійсні. Повторюємо без cookies. stderr: {Stderr}", stderr);
+                var candidateArgs = BuildYtDlpArgs(videoUrl, outputTemplate, downloadCookiesPath);
+                _logger.LogInformation("Завантажуємо YouTube-кандидат (cookies={HasCookies}): {VideoUrl}",
+                    downloadCookiesPath is not null, videoUrl);
 
-                // Очищаємо тимчасову директорію перед повторною спробою
-                foreach (var f in Directory.GetFiles(tempDir)) File.Delete(f);
-
-                downloadCookiesPath = null;
-                argsList = BuildYtDlpArgs(videoUrl ?? $"ytsearch1:{searchQuery}", outputTemplate, downloadCookiesPath);
-
-                _logger.LogInformation("Запускаємо yt-dlp (спроба 2, без cookies): {Args}",
-                    string.Join(" ", argsList));
-
-                (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
-            }
-
-            // If the duration-matched video cannot be downloaded, retry the original YouTube search.
-            if (exitCode != 0 && videoUrl is not null)
-            {
-                _logger.LogWarning("Не вдалося завантажити вибране за тривалістю відео для {Track}. Повторюємо звичайний пошук.",
-                    $"{track.Artist} - {track.Title}");
-                foreach (var file in Directory.GetFiles(tempDir))
-                    File.Delete(file);
-
-                argsList = BuildYtDlpArgs($"ytsearch1:{searchQuery}", outputTemplate, downloadCookiesPath);
-                (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
-
-                if (exitCode != 0 && downloadCookiesPath is not null && IsCookieRelatedError(stderr))
+                var result = await RunProcessAsync("yt-dlp", candidateArgs, timeoutSeconds: 120);
+                if (result.ExitCode != 0 && downloadCookiesPath is not null && IsCookieRelatedError(result.Stderr))
                 {
-                    _logger.LogWarning("Cookies не спрацювали для резервного пошуку; повторюємо без них.");
-                    foreach (var file in Directory.GetFiles(tempDir))
-                        File.Delete(file);
+                    _logger.LogWarning("Cookies явно недійсні або ротовані. Повторюємо без них.");
+                    foreach (var file in Directory.GetFiles(tempDir)) File.Delete(file);
 
                     downloadCookiesPath = null;
-                    argsList = BuildYtDlpArgs($"ytsearch1:{searchQuery}", outputTemplate, cookiesPath: null);
-                    (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
+                    candidateArgs = BuildYtDlpArgs(videoUrl, outputTemplate, cookiesPath: null);
+                    result = await RunProcessAsync("yt-dlp", candidateArgs, timeoutSeconds: 120);
                 }
+
+                return result;
+            }
+
+            var exitCode = 1;
+            var stdout = string.Empty;
+            var stderr = string.Empty;
+            var downloadSucceeded = false;
+
+            for (var candidateIndex = 0; candidateIndex < candidateUrls.Count; candidateIndex++)
+            {
+                if (candidateIndex > 0)
+                    foreach (var file in Directory.GetFiles(tempDir)) File.Delete(file);
+
+                (exitCode, stdout, stderr) = await DownloadCandidateAsync(candidateUrls[candidateIndex]);
+                downloadSucceeded = exitCode == 0 && Directory.GetFiles(tempDir).Length > 0;
+                if (downloadSucceeded)
+                    break;
+
+                _logger.LogWarning("YouTube-кандидат {CandidateNumber} не створив аудіофайл для {Track}: {Stderr}",
+                    candidateIndex + 1, $"{track.Artist} - {track.Title}", stderr);
+            }
+
+            // Try a differently ordered search once all duration-ranked candidates have failed.
+            if (!downloadSucceeded)
+            {
+                foreach (var file in Directory.GetFiles(tempDir)) File.Delete(file);
+                var fallbackQuery = $"{track.Title} {track.Artist}";
+                _logger.LogWarning("Кандидати yt-dlp не спрацювали для {Track}; пробуємо пошук у зворотному порядку.",
+                    $"{track.Artist} - {track.Title}");
+                (exitCode, stdout, stderr) = await DownloadCandidateAsync($"ytsearch1:{fallbackQuery}");
+                downloadSucceeded = exitCode == 0 && Directory.GetFiles(tempDir).Length > 0;
             }
 
             if (exitCode != 0)
@@ -113,22 +119,6 @@ public class YtDlpDownloadService : IDownloadService
                     throw new Exception($"Не вдалося знайти трек \"{track.Artist} - {track.Title}\" на YouTube.");
 
                 throw new Exception($"Не вдалося завантажити трек. Помилка yt-dlp (код {exitCode}).");
-            }
-
-            if (!File.Exists(expectedMp3) && Directory.GetFiles(tempDir).Length == 0)
-            {
-                var fallbackQuery = $"{track.Title} {track.Artist}";
-                _logger.LogWarning("yt-dlp не створив файл за запитом {Query}. Повторюємо пошук як {FallbackQuery}",
-                    searchQuery, fallbackQuery);
-
-                argsList = BuildYtDlpArgs($"ytsearch1:{fallbackQuery}", outputTemplate,
-                    hasCookies ? cookiesPath : null);
-                (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", argsList, timeoutSeconds: 120);
-                if (exitCode != 0)
-                {
-                    _logger.LogWarning("Повторний пошук завершився з кодом {ExitCode}. stderr: {Stderr}", exitCode, stderr);
-                    throw new Exception($"Не вдалося завантажити трек \"{track.Artist} - {track.Title}\" з YouTube.");
-                }
             }
 
             // Перевіряємо чи файл створився
@@ -164,7 +154,7 @@ public class YtDlpDownloadService : IDownloadService
     /// <summary>
     /// Шукає кілька відео-кандидатів і вибирає результат із найближчою тривалістю.
     /// </summary>
-    private async Task<string?> FindBestYoutubeMatchAsync(string searchQuery, SpotTrackDto track, string? cookiesPath)
+    private async Task<List<string>> FindYoutubeMatchesAsync(string searchQuery, SpotTrackDto track, string? cookiesPath)
     {
         var args = BuildYtDlpSearchArgs(searchQuery, cookiesPath);
 
@@ -180,7 +170,7 @@ public class YtDlpDownloadService : IDownloadService
         {
             _logger.LogWarning("Не вдалося отримати результати пошуку YouTube (код {ExitCode}); беремо перший результат звичайним пошуком. stderr: {Stderr}",
                 exitCode, stderr);
-            return null;
+            return [];
         }
 
         try
@@ -226,15 +216,15 @@ public class YtDlpDownloadService : IDownloadService
             if (candidates.Count == 0)
             {
                 _logger.LogWarning("yt-dlp не повернув придатних кандидатів; беремо перший результат пошуку.");
-                return null;
+                return [];
             }
 
-            var firstWithDuration = candidates.FirstOrDefault(candidate => candidate.Duration.HasValue);
-            var selected = track.DurationMs > 0 && firstWithDuration.Duration.HasValue
-                ? candidates.Where(candidate => candidate.Duration.HasValue)
-                    .OrderBy(candidate => Math.Abs(candidate.Duration!.Value - track.DurationMs / 1000d))
-                    .First()
-                : candidates[0];
+            var orderedCandidates = track.DurationMs > 0
+                ? candidates.OrderBy(candidate => candidate.Duration.HasValue
+                    ? Math.Abs(candidate.Duration.Value - track.DurationMs / 1000d)
+                    : double.MaxValue).ToList()
+                : candidates;
+            var selected = orderedCandidates[0];
 
             if (track.DurationMs > 0 && selected.Duration.HasValue)
             {
@@ -252,12 +242,12 @@ public class YtDlpDownloadService : IDownloadService
                 _logger.LogWarning("Тривалість кандидатів або Spotify відсутня; беремо перший результат: {Title}", selected.Title);
             }
 
-            return selected.Url;
+            return orderedCandidates.Select(candidate => candidate.Url).ToList();
         }
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "Не вдалося розібрати результати пошуку yt-dlp; беремо перший результат звичайним пошуком.");
-            return null;
+            return [];
         }
     }
 
