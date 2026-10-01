@@ -800,6 +800,25 @@ body {
     box-shadow: 0 0 12px rgba(29, 185, 84, 0.15);
 }
 
+.artist-avatar-wrap[hidden],
+.artist-link[hidden],
+.artist-avatar[hidden] {
+    display: none;
+}
+
+.artist-avatar-wrap.is-placeholder {
+    display: grid;
+    place-items: center;
+    background: linear-gradient(145deg, rgba(29, 185, 84, 0.22), rgba(255, 255, 255, 0.08));
+    color: var(--spotify-green-light);
+}
+
+.artist-avatar-wrap.is-placeholder::after {
+    content: attr(data-initial);
+    font-size: 1.7rem;
+    font-weight: 700;
+}
+
 .artist-avatar {
     width: 100%;
     height: 100%;

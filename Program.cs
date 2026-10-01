@@ -4,6 +4,8 @@ using System.Net;
 using SpotGet.Models;
 using SpotGet.Services;
 
+const int maxCollectionTracks = 1000;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Кешування метаданих Spotify в пам'яті
@@ -242,8 +244,8 @@ app.MapPost("/api/download-collection", async (TrackRequest request, HttpContext
     try
     {
         var collection = await spotify.GetCollectionInfoAsync(request.Url);
-        if (collection.Tracks.Count > 100)
-            return Results.BadRequest(new { error = "За один раз можна завантажити не більше 100 треків." });
+        if (collection.Tracks.Count > maxCollectionTracks)
+            return Results.BadRequest(new { error = $"За один раз можна завантажити не більше {maxCollectionTracks} треків." });
 
         tempDir = Path.Combine(Path.GetTempPath(), $"spotget_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
@@ -256,7 +258,25 @@ app.MapPost("/api/download-collection", async (TrackRequest request, HttpContext
         {
             try
             {
-                var trackPath = await queue.EnqueueAsync(() => downloader.DownloadAndTagTrackAsync(track));
+                var trackPath = await queue.EnqueueAsync(async () =>
+                {
+                    if (string.Equals(collection.Type, "playlist", StringComparison.OrdinalIgnoreCase) &&
+                        string.IsNullOrWhiteSpace(track.CoverUrl))
+                    {
+                        try
+                        {
+                            track.CoverUrl = await spotify.GetTrackCoverUrlAsync(track.SpotifyUrl)
+                                ?? collection.CoverUrl;
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "Не вдалося отримати обкладинку треку {Title}; використовую обкладинку плейлиста", track.Title);
+                            track.CoverUrl = collection.CoverUrl;
+                        }
+                    }
+
+                    return await downloader.DownloadAndTagTrackAsync(track);
+                });
                 return (TrackPath: (string?)trackPath, Failure: (string?)null);
             }
             catch (Exception ex)

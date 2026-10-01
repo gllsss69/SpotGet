@@ -42,6 +42,9 @@ public partial class SpotifyService : ISpotifyService
     [GeneratedRegex("<script[^>]+id=\\\"__NEXT_DATA__\\\"[^>]*>(?<json>.*?)</script>", RegexOptions.Singleline)]
     private static partial Regex NextDataRegex();
 
+    [GeneratedRegex("""data-testid=["']entity-owner["'].*?<a\b[^>]*href=["'](?<path>/user/[^"'?]+)["']""", RegexOptions.Singleline)]
+    private static partial Regex PlaylistOwnerProfileRegex();
+
     // Regex для витягування значення content із <meta> тегів.
     // Підтримує обидва порядки атрибутів: property/name → content та content → property/name.
     [GeneratedRegex("""<meta\s+(?:(?:property|name)="(?<prop>[^"]+)"\s+content="(?<val>[^"]*)"|content="(?<val2>[^"]*)"\s+(?:property|name)="(?<prop2>[^"]+)")\s*/?>""")] 
@@ -134,6 +137,24 @@ public partial class SpotifyService : ISpotifyService
         return result;
     }
 
+    public async Task<string?> GetTrackCoverUrlAsync(string spotifyUrl)
+    {
+        var trackId = ParseTrackId(spotifyUrl);
+        if (_cache.TryGetValue($"track:{trackId}", out SpotTrackDto? track) && track is not null)
+            return track.CoverUrl;
+
+        var cacheKey = $"track-cover:{trackId}";
+        if (_cache.TryGetValue(cacheKey, out string? cachedCoverUrl))
+            return cachedCoverUrl;
+
+        var metadata = await FetchHtmlMetaAsync(trackId);
+        var coverUrl = metadata.GetValueOrDefault("og:image");
+        if (!string.IsNullOrWhiteSpace(coverUrl))
+            _cache.Set(cacheKey, coverUrl, CacheDuration);
+
+        return coverUrl;
+    }
+
     /// <inheritdoc />
     public async Task<SpotCollectionDto> GetCollectionInfoAsync(string spotifyUrl)
     {
@@ -147,7 +168,7 @@ public partial class SpotifyService : ISpotifyService
 
         var type = match.Groups["type"].Value.ToLowerInvariant();
         var id = match.Groups["id"].Value;
-        var cacheKey = $"collection:{type}:{id}";
+        var cacheKey = $"collection:v7:{type}:{id}";
         if (_cache.TryGetValue(cacheKey, out SpotCollectionDto? cached) && cached is not null)
             return cached;
 
@@ -178,6 +199,19 @@ public partial class SpotifyService : ISpotifyService
         var title = GetString(entity, "name", "title")
                     ?? metadata.GetValueOrDefault("og:title")
                     ?? (type == "album" ? "Spotify album" : "Spotify playlist");
+        var creatorInfos = type == "playlist" ? GetCreatorInfos(entity) : [];
+        if (type == "playlist" && creatorInfos.Count > 0)
+        {
+            try
+            {
+                await EnrichPlaylistCreatorInfoAsync(canonicalUrl, creatorInfos[0]);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Не вдалося отримати аватар автора плейлиста {PlaylistId}", id);
+            }
+        }
+
         var coverUrl = FindCoverUrl(entity) ?? metadata.GetValueOrDefault("og:image");
         if (string.IsNullOrWhiteSpace(coverUrl))
             coverUrl = await FetchOEmbedThumbnailAsync(canonicalUrl);
@@ -210,7 +244,7 @@ public partial class SpotifyService : ISpotifyService
                 Title = trackTitle,
                 Artist = artists,
                 Album = type == "album" ? title : GetAlbumName(track),
-                CoverUrl = FindCoverUrl(track) ?? coverUrl,
+                CoverUrl = FindCoverUrl(track) ?? (type == "album" ? coverUrl : null),
                 DurationMs = GetDurationMs(track),
                 TrackNumber = GetUInt32(track, "trackNumber", "track_number") is var explicitNumber && explicitNumber > 0
                     ? explicitNumber
@@ -226,7 +260,7 @@ public partial class SpotifyService : ISpotifyService
             track.TrackCount = (uint)tracks.Count;
 
         SpotArtistDto? artistInfo = null;
-        if (tracks[0].SpotifyUrl != canonicalUrl)
+        if (type == "album" && tracks[0].SpotifyUrl != canonicalUrl)
         {
             try
             {
@@ -246,6 +280,7 @@ public partial class SpotifyService : ISpotifyService
             SpotifyUrl = canonicalUrl,
             CoverUrl = coverUrl,
             ArtistInfo = artistInfo,
+            CreatorInfos = creatorInfos,
             Tracks = tracks
         };
         _cache.Set(cacheKey, result, CacheDuration);
@@ -326,6 +361,85 @@ public partial class SpotifyService : ISpotifyService
                 return value.GetString();
         }
         return null;
+    }
+
+    private static List<SpotArtistDto> GetCreatorInfos(JsonElement entity)
+    {
+        var creators = new List<SpotArtistDto>();
+        foreach (var propertyName in new[] { "authors", "author", "owner", "owners", "ownerV2", "creator", "creators", "createdBy" })
+        {
+            if (!TryGetProperty(entity, propertyName, out var value))
+                continue;
+
+            AddCreatorInfos(value, creators);
+        }
+
+        // Spotify embeds user playlists in `subtitle`, while `authors` may be null.
+        if (creators.Count == 0)
+        {
+            var subtitle = GetString(entity, "subtitle");
+            if (!string.IsNullOrWhiteSpace(subtitle))
+                creators.Add(new SpotArtistDto { Name = subtitle });
+        }
+
+        return creators
+            .DistinctBy(creator => creator.SpotifyUrl.Length > 0 ? creator.SpotifyUrl : creator.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void AddCreatorInfos(JsonElement value, List<SpotArtistDto> creators)
+    {
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var creatorName = value.GetString();
+            if (!string.IsNullOrWhiteSpace(creatorName))
+                creators.Add(new SpotArtistDto { Name = creatorName });
+            return;
+        }
+
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+                AddCreatorInfos(item, creators);
+            return;
+        }
+
+        if (value.ValueKind != JsonValueKind.Object)
+            return;
+
+        var name = GetString(value, "display_name", "displayName", "name", "username");
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var uri = GetString(value, "uri", "url", "href", "spotifyUrl");
+            if (string.IsNullOrWhiteSpace(uri))
+            {
+                var id = GetString(value, "id");
+                if (!string.IsNullOrWhiteSpace(id))
+                    uri = $"https://open.spotify.com/user/{id}";
+            }
+            else if (uri.StartsWith("spotify:user:", StringComparison.OrdinalIgnoreCase))
+            {
+                uri = $"https://open.spotify.com/user/{uri["spotify:user:".Length..]}";
+            }
+            else if (uri.StartsWith('/'))
+            {
+                uri = $"https://open.spotify.com{uri}";
+            }
+
+            creators.Add(new SpotArtistDto
+            {
+                Name = name,
+                AvatarUrl = FindCoverUrl(value),
+                SpotifyUrl = uri ?? string.Empty
+            });
+            return;
+        }
+
+        foreach (var wrapperName in new[] { "data", "user", "owner", "creator" })
+        {
+            if (TryGetProperty(value, wrapperName, out var nested))
+                AddCreatorInfos(nested, creators);
+        }
     }
 
     private static string GetArtists(JsonElement track)
@@ -538,10 +652,16 @@ public partial class SpotifyService : ISpotifyService
     /// Завантажує сторінку виконавця та парсить OG мета-теги
     /// для отримання аватарки, імені та опису.
     /// </summary>
-    private async Task<SpotArtistDto> FetchArtistInfoAsync(string artistPageUrl)
+    private async Task<SpotArtistDto> FetchArtistInfoAsync(
+        string artistPageUrl,
+        string? userAgent = null,
+        bool useRandomUserAgent = true)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, artistPageUrl);
-        request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
+        if (userAgent is not null)
+            request.Headers.UserAgent.ParseAdd(userAgent);
+        else if (useRandomUserAgent)
+            request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
 
         var response = await _httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
@@ -556,6 +676,32 @@ public partial class SpotifyService : ISpotifyService
             Description = meta.GetValueOrDefault("og:description"),
             SpotifyUrl = meta.GetValueOrDefault("og:url", artistPageUrl)
         };
+    }
+
+    private async Task EnrichPlaylistCreatorInfoAsync(string playlistUrl, SpotArtistDto creator)
+    {
+        if (!string.IsNullOrWhiteSpace(creator.AvatarUrl) && !string.IsNullOrWhiteSpace(creator.SpotifyUrl))
+            return;
+
+        var profileUrl = creator.SpotifyUrl;
+        if (string.IsNullOrWhiteSpace(profileUrl))
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, playlistUrl);
+            using var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+                return;
+
+            var html = await response.Content.ReadAsStringAsync();
+            var ownerMatch = PlaylistOwnerProfileRegex().Match(html);
+            if (!ownerMatch.Success)
+                return;
+
+            profileUrl = $"https://open.spotify.com{ownerMatch.Groups["path"].Value}";
+        }
+
+        var profileInfo = await FetchArtistInfoAsync(profileUrl, useRandomUserAgent: false);
+        creator.SpotifyUrl = profileInfo.SpotifyUrl;
+        creator.AvatarUrl = profileInfo.AvatarUrl;
     }
 
     /// <summary>

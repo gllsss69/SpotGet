@@ -15,6 +15,11 @@ public interface ISpotifyService
     Task<SpotTrackDto> GetTrackInfoAsync(string spotifyUrl);
 
     /// <summary>
+    /// Gets the album cover URL for a Spotify track without fetching its other metadata.
+    /// </summary>
+    Task<string?> GetTrackCoverUrlAsync(string spotifyUrl);
+
+    /// <summary>
     /// Gets the track list for a Spotify album or playlist URL.
     /// </summary>
     Task<SpotCollectionDto> GetCollectionInfoAsync(string spotifyUrl);

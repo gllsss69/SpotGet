@@ -44,10 +44,12 @@ const coverOverlay = document.querySelector('.cover-overlay');
 const previewProgress = document.getElementById('previewProgress');
 
 const artistSection     = document.getElementById('artistSection');
+const artistAvatarWrap  = document.querySelector('.artist-avatar-wrap');
 const artistAvatar      = document.getElementById('artistAvatar');
 const artistName        = document.getElementById('artistName');
 const artistDescription = document.getElementById('artistDescription');
 const artistLink        = document.getElementById('artistLink');
+const artistLinkLabel   = document.getElementById('artistLinkLabel');
 
 let currentAudio = null;
 let isPlaying = false;
@@ -427,7 +429,11 @@ function showCollection(collection) {
     });
 
     collectionSection.hidden = false;
-    showArtistInfo(collection.artistInfo);
+    if (collection.type?.toLowerCase() === 'playlist') {
+        showPlaylistCreators(collection.creatorInfos, collection.spotifyUrl);
+    } else {
+        showArtistInfo(collection.artistInfo);
+    }
 }
 
 function refreshDynamicTranslations() {
@@ -435,6 +441,9 @@ function refreshDynamicTranslations() {
 
     collectionType.textContent = translations[currentLang][currentCollection.type] || currentCollection.type;
     collectionTrackCount.textContent = `${currentCollection.tracks.length} ${translations[currentLang].tracks}`;
+    if (currentCollection.type?.toLowerCase() === 'playlist') {
+        showPlaylistCreators(currentCollection.creatorInfos, currentCollection.spotifyUrl);
+    }
     collectionTrackList.querySelectorAll('.collection-track-download').forEach(button => {
         button.setAttribute('aria-label', `${translations[currentLang].downloadTrack}: ${button.dataset.trackTitle}`);
     });
@@ -489,12 +498,51 @@ function showArtistInfo(artistInfo) {
         return;
     }
 
-    artistAvatar.src = artistInfo.avatarUrl || '';
-    artistAvatar.alt = `${artistInfo.name} — avatar`;
+    setArtistAvatar(artistInfo.avatarUrl, artistInfo.name);
     artistName.textContent = artistInfo.name;
     artistDescription.textContent = artistInfo.description || '';
     artistLink.href = artistInfo.spotifyUrl || '#';
+    artistLink.hidden = !artistInfo.spotifyUrl;
+    artistLinkLabel.textContent = translations[currentLang].artistProfile;
     artistSection.hidden = false;
+}
+
+function showPlaylistCreators(creators, playlistUrl) {
+    if (!creators?.length) {
+        artistSection.hidden = true;
+        return;
+    }
+
+    const primaryCreator = creators[0];
+    setArtistAvatar(primaryCreator.avatarUrl, primaryCreator.name);
+    artistName.textContent = creators.map(creator => creator.name).join(', ');
+    artistDescription.textContent = '';
+    artistLink.href = creators.length === 1 && primaryCreator.spotifyUrl ? primaryCreator.spotifyUrl : playlistUrl || '#';
+    artistLink.hidden = creators.length > 1 || !primaryCreator.spotifyUrl;
+    artistLinkLabel.textContent = translations[currentLang][creators.length > 1 ? 'playlistCreators' : 'playlistCreator'];
+    artistSection.hidden = false;
+}
+
+function setArtistAvatar(avatarUrl, name) {
+    const initial = name?.trim().charAt(0).toLocaleUpperCase() || '?';
+    artistAvatarWrap.dataset.initial = initial;
+    artistAvatar.alt = `${name || ''} — avatar`;
+    artistAvatarWrap.hidden = false;
+    artistAvatar.hidden = !avatarUrl;
+    artistAvatarWrap.classList.toggle('is-placeholder', !avatarUrl);
+
+    if (avatarUrl) {
+        artistAvatar.onerror = () => {
+            artistAvatar.hidden = true;
+            artistAvatarWrap.classList.add('is-placeholder');
+        };
+        artistAvatar.onload = () => artistAvatarWrap.classList.remove('is-placeholder');
+        artistAvatar.src = avatarUrl;
+    } else {
+        artistAvatar.removeAttribute('src');
+        artistAvatar.onerror = null;
+        artistAvatar.onload = null;
+    }
 }
 
 function hideResult() {

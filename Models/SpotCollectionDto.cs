@@ -10,5 +10,6 @@ public class SpotCollectionDto
     public string SpotifyUrl { get; set; } = string.Empty;
     public string? CoverUrl { get; set; }
     public SpotArtistDto? ArtistInfo { get; set; }
+    public List<SpotArtistDto> CreatorInfos { get; set; } = [];
     public List<SpotTrackDto> Tracks { get; set; } = [];
 }
