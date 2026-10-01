@@ -62,6 +62,17 @@ public class TempFileCleanupService : BackgroundService
             {
                 try
                 {
+                    var activeMarker = Path.Combine(dir, ".in-progress");
+                    if (File.Exists(activeMarker))
+                    {
+                        if (now - File.GetLastWriteTimeUtc(activeMarker) > MaxFileAge)
+                        {
+                            Directory.Delete(dir, recursive: true);
+                            deletedCount++;
+                        }
+                        continue;
+                    }
+
                     var dirInfo = new DirectoryInfo(dir);
                     var age = now - dirInfo.LastWriteTimeUtc;
 

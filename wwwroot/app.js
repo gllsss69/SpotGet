@@ -27,6 +27,7 @@ const collectionSpotifyLink = document.getElementById('collectionSpotifyLink');
 const downloadCollectionBtn = document.getElementById('downloadCollectionBtn');
 const collectionDlText = downloadCollectionBtn.querySelector('.collection-dl-text');
 const collectionDlLoader = downloadCollectionBtn.querySelector('.collection-dl-loader');
+const collectionDlProgress = downloadCollectionBtn.querySelector('.collection-dl-progress');
 const coverImg = document.getElementById('coverImg');
 const trackTitle = document.getElementById('trackTitle');
 const trackArtist = document.getElementById('trackArtist');
@@ -110,32 +111,83 @@ downloadCollectionBtn.addEventListener('click', async () => {
     setCollectionDownloadLoading(true);
     hideError();
     try {
-        const response = await fetch('/api/download-collection', {
+        const startResponse = await fetch('/api/download-collection', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url }),
         });
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
+        if (!startResponse.ok) {
+            const data = await startResponse.json().catch(() => ({}));
             showError(translateError(data.error || data.detail || translations[currentLang].errDl));
             return;
         }
 
-        const blob = await response.blob();
-        const disposition = response.headers.get('Content-Disposition') || '';
-        const encodedName = disposition.match(/filename\*=UTF-8''([^;\n]*)/i);
-        const filename = encodedName ? decodeURIComponent(encodedName[1]) : `${collectionTitle.textContent || 'Spotify collection'}.zip`;
-        const blobUrl = URL.createObjectURL(blob);
+        const { jobId } = await startResponse.json();
+        if (!jobId) throw new Error('Missing collection download job id.');
+
+        let jobStatus;
+        while (true) {
+            await new Promise(resolve => window.setTimeout(resolve, 4000));
+            const statusResponse = await fetch(`/api/download-collection/${encodeURIComponent(jobId)}`, {
+                cache: 'no-store',
+            });
+            if (statusResponse.status === 429) continue;
+            if (!statusResponse.ok) {
+                const data = await statusResponse.json().catch(() => ({}));
+                showError(translateError(data.error || data.detail || translations[currentLang].errDl));
+                return;
+            }
+
+            jobStatus = await statusResponse.json();
+            if (jobStatus.status === 'preparing') {
+                collectionDlProgress.textContent = translations[currentLang].collectionPreparing;
+            } else if (jobStatus.status === 'downloading') {
+                collectionDlProgress.textContent = translations[currentLang].collectionProgress
+                    .replace('{progress}', jobStatus.progress)
+                    .replace('{total}', jobStatus.total);
+            } else if (jobStatus.status === 'packing') {
+                collectionDlProgress.textContent = translations[currentLang].collectionPacking;
+            } else if (jobStatus.status === 'sending') {
+                collectionDlProgress.textContent = translations[currentLang].collectionSending;
+            }
+
+            if (jobStatus.status === 'failed') {
+                showError(translateError(jobStatus.error || translations[currentLang].errDl));
+                return;
+            }
+            if (jobStatus.status === 'completed') break;
+        }
+
+        const filename = jobStatus.fileName || `${collectionTitle.textContent || 'Spotify collection'}.zip`;
         const anchor = document.createElement('a');
-        anchor.href = blobUrl;
+        anchor.href = `/api/download-collection/${encodeURIComponent(jobId)}/file`;
         anchor.download = filename;
         document.body.appendChild(anchor);
         anchor.click();
         anchor.remove();
-        URL.revokeObjectURL(blobUrl);
+
+        while (true) {
+            await new Promise(resolve => window.setTimeout(resolve, 5000));
+            const statusResponse = await fetch(`/api/download-collection/${encodeURIComponent(jobId)}`, {
+                cache: 'no-store',
+            });
+            if (statusResponse.status === 429) continue;
+            if (!statusResponse.ok) break;
+            jobStatus = await statusResponse.json();
+            if (jobStatus.status === 'sending' || jobStatus.status === 'completed') {
+                collectionDlProgress.textContent = translations[currentLang].collectionSending;
+                continue;
+            }
+            if (jobStatus.status === 'failed') {
+                showError(translateError(jobStatus.error || translations[currentLang].errDl));
+                return;
+            }
+            break;
+        }
+
         showDownloadNotification(filename);
 
-        const skippedTracks = Number(response.headers.get('X-SpotGet-Skipped-Tracks') || 0);
+        const skippedTracks = Number(jobStatus.skipped || 0);
         if (skippedTracks > 0) {
             showWarning(translations[currentLang].partialDownload.replace('{count}', skippedTracks));
         }
@@ -306,6 +358,7 @@ function setCollectionDownloadLoading(on) {
     downloadCollectionBtn.disabled = on;
     collectionDlText.hidden = on;
     collectionDlLoader.hidden = !on;
+    collectionDlProgress.textContent = on ? translations[currentLang].collectionPreparing : '';
 }
 
 function setLoading(on) {

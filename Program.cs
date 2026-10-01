@@ -1,10 +1,7 @@
 using System.Threading.RateLimiting;
-using System.IO.Compression;
 using System.Net;
 using SpotGet.Models;
 using SpotGet.Services;
-
-const int maxCollectionTracks = 1000;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +16,8 @@ builder.Services.AddHttpClient("SpotifyImages")
 
 // Черга завантажень (макс. 3 одночасних завантаження з YouTube)
 builder.Services.AddSingleton(new DownloadQueue(maxConcurrent: 3));
+builder.Services.AddSingleton<CollectionDownloadJobService>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<CollectionDownloadJobService>());
 
 // Лічильник унікальних відвідувачів
 builder.Services.AddSingleton<VisitorService>();
@@ -235,139 +234,58 @@ app.MapPost("/api/collection-info", async (TrackRequest request, ISpotifyService
 .WithName("GetCollectionInfo")
 .WithDescription("Повертає список треків Spotify-альбому або плейліста.");
 
-app.MapPost("/api/download-collection", async (TrackRequest request, HttpContext context, ISpotifyService spotify, IDownloadService downloader, DownloadQueue queue, ILogger<Program> logger) =>
+app.MapPost("/api/download-collection", (TrackRequest request, CollectionDownloadJobService jobs) =>
 {
     if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
         return Results.BadRequest(new { error = "Посилання не може бути порожнім або занадто довгим." });
 
-    string? tempDir = null;
     try
     {
-        var collection = await spotify.GetCollectionInfoAsync(request.Url);
-        if (collection.Tracks.Count > maxCollectionTracks)
-            return Results.BadRequest(new { error = $"За один раз можна завантажити не більше {maxCollectionTracks} треків." });
-
-        tempDir = Path.Combine(Path.GetTempPath(), $"spotget_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
-        var zipPath = Path.Combine(tempDir, "collection.zip");
-        var failedTracks = new List<string>();
-        var downloadedTracks = 0;
-
-        // Download tracks concurrently; DownloadQueue enforces the global concurrency limit.
-        var downloadResults = await Task.WhenAll(collection.Tracks.Select(async (track, index) =>
-        {
-            try
-            {
-                var trackPath = await queue.EnqueueAsync(async () =>
-                {
-                    if (string.Equals(collection.Type, "playlist", StringComparison.OrdinalIgnoreCase) &&
-                        string.IsNullOrWhiteSpace(track.CoverUrl))
-                    {
-                        try
-                        {
-                            track.CoverUrl = await spotify.GetTrackCoverUrlAsync(track.SpotifyUrl)
-                                ?? collection.CoverUrl;
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.LogWarning(ex, "Не вдалося отримати обкладинку треку {Title}; використовую обкладинку плейлиста", track.Title);
-                            track.CoverUrl = collection.CoverUrl;
-                        }
-                    }
-
-                    return await downloader.DownloadAndTagTrackAsync(track);
-                });
-                return (TrackPath: (string?)trackPath, Failure: (string?)null);
-            }
-            catch (Exception ex)
-            {
-                var failure = $"{index + 1:00}. {track.Artist} - {track.Title}: {ex.Message}";
-                logger.LogWarning(ex, "Не вдалося завантажити трек {TrackNumber}: {Title}", index + 1, track.Title);
-                return (TrackPath: (string?)null, Failure: failure);
-            }
-        }));
-
-        using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
-        {
-            for (var i = 0; i < collection.Tracks.Count; i++)
-            {
-                var track = collection.Tracks[i];
-                var trackPath = downloadResults[i].TrackPath;
-                if (trackPath is null)
-                {
-                    failedTracks.Add(downloadResults[i].Failure!);
-                    continue;
-                }
-
-                try
-                {
-                    var entryName = $"{i + 1:00} - {SafeFilePart(track.Title)}.mp3";
-                    var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
-                    await using var source = File.OpenRead(trackPath);
-                    await using var destination = entry.Open();
-                    await source.CopyToAsync(destination);
-                    downloadedTracks++;
-                }
-                catch (Exception ex)
-                {
-                    var failure = $"{i + 1:00}. {track.Artist} - {track.Title}: {ex.Message}";
-                    failedTracks.Add(failure);
-                    logger.LogWarning(ex, "Не вдалося додати трек {TrackNumber} до ZIP: {Title}", i + 1, track.Title);
-                }
-                finally
-                {
-                    try
-                    {
-                        var trackDir = Path.GetDirectoryName(trackPath);
-                        if (trackDir is not null && Path.GetFileName(trackDir).StartsWith("spotget_", StringComparison.Ordinal))
-                            Directory.Delete(trackDir, recursive: true);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(ex, "Не вдалося прибрати тимчасові файли треку {Title}", track.Title);
-                    }
-                }
-            }
-
-            if (downloadedTracks == 0)
-                throw new InvalidOperationException("Не вдалося завантажити жодного треку з цієї колекції.");
-
-            if (failedTracks.Count > 0)
-            {
-                var report = archive.CreateEntry("_download-report.txt", CompressionLevel.Fastest);
-                await using var reportStream = report.Open();
-                await using var writer = new StreamWriter(reportStream);
-                await writer.WriteLineAsync("Деякі треки не вдалося завантажити:");
-                foreach (var failure in failedTracks)
-                    await writer.WriteLineAsync(failure);
-            }
-        }
-
-        context.Response.Headers["X-SpotGet-Skipped-Tracks"] = failedTracks.Count.ToString();
-        var stream = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.DeleteOnClose);
-        return Results.File(stream, "application/zip", $"{SafeFilePart(collection.Title)}.zip");
+        var jobId = jobs.Enqueue(request.Url);
+        return Results.Accepted($"/api/download-collection/{jobId}", new { jobId });
     }
-    catch (ArgumentException ex)
+    catch (InvalidOperationException ex)
     {
-        if (tempDir is not null) try { Directory.Delete(tempDir, recursive: true); } catch { }
-        return Results.BadRequest(new { error = ex.Message });
-    }
-    catch (Exception ex)
-    {
-        if (tempDir is not null) try { Directory.Delete(tempDir, recursive: true); } catch { }
-        logger.LogError(ex, "Помилка завантаження Spotify-колекції");
-        return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+        return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 })
 .WithName("DownloadCollection")
 .WithDescription("Завантажує треки альбому або плейліста в ZIP-архів.");
 
-static string SafeFilePart(string value)
+app.MapGet("/api/download-collection/{jobId:guid}", (Guid jobId, HttpContext context, CollectionDownloadJobService jobs) =>
 {
-    var invalidChars = Path.GetInvalidFileNameChars();
-    var safe = new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim();
-    return string.IsNullOrWhiteSpace(safe) ? "Spotify collection" : safe[..Math.Min(safe.Length, 100)];
-}
+    var status = jobs.GetStatus(jobId);
+    if (status is null) return Results.NotFound();
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(status);
+});
+
+app.MapGet("/api/download-collection/{jobId:guid}/file", (Guid jobId, HttpContext context, CollectionDownloadJobService jobs) =>
+{
+    var artifact = jobs.GetArtifact(jobId);
+    if (artifact is null)
+    {
+        var status = jobs.GetStatus(jobId);
+        if (status is null) return Results.NotFound();
+        if (status.Status == "failed")
+            return Results.Problem(detail: status.Error ?? "Не вдалося зібрати ZIP-архів.", statusCode: StatusCodes.Status500InternalServerError);
+        return Results.Conflict(new { error = "Архів ще готується." });
+    }
+
+    context.Response.Headers["X-SpotGet-Skipped-Tracks"] = artifact.Skipped.ToString();
+    var stream = new FileStream(artifact.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.DeleteOnClose);
+    if (!jobs.TryBeginFileTransfer(jobId))
+    {
+        stream.Dispose();
+        return Results.Conflict(new { error = "Архів уже передається або його вже завантажили." });
+    }
+    context.Response.OnCompleted(() =>
+    {
+        jobs.MarkFileDelivered(jobId, artifact.Directory);
+        return Task.CompletedTask;
+    });
+    return Results.File(stream, "application/zip", artifact.FileName);
+});
 
 static bool IsSpotifyImageUri(Uri uri)
 {
