@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using System.IO.Compression;
+using System.Net;
 using SpotGet.Models;
 using SpotGet.Services;
 
@@ -11,6 +12,8 @@ builder.Services.AddMemoryCache();
 // HTTP-клієнти для SpotifyService та DownloadService
 builder.Services.AddHttpClient<ISpotifyService, SpotifyService>();
 builder.Services.AddHttpClient<IDownloadService, YtDlpDownloadService>();
+builder.Services.AddHttpClient("SpotifyImages")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 
 // Черга завантажень (макс. 3 одночасних завантаження з YouTube)
 builder.Services.AddSingleton(new DownloadQueue(maxConcurrent: 3));
@@ -118,6 +121,92 @@ app.MapPost("/api/download", async (TrackRequest request, ISpotifyService spotif
 .WithName("DownloadTrack")
 .WithDescription("Завантажує MP3 треку за Spotify посиланням.");
 
+app.MapPost("/api/download-cover", async (CoverDownloadRequest request, IHttpClientFactory httpClientFactory) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000 ||
+        string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 200)
+        return Results.BadRequest(new { error = "Некоректне посилання або назва обкладинки." });
+
+    if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var imageUri) || !IsSpotifyImageUri(imageUri))
+        return Results.BadRequest(new { error = "Дозволено завантажувати лише зображення з CDN Spotify." });
+
+    const long maxImageBytes = 15 * 1024 * 1024;
+    using var client = httpClientFactory.CreateClient("SpotifyImages");
+    HttpResponseMessage? imageResponse = null;
+
+    try
+    {
+        for (var redirect = 0; redirect <= 3; redirect++)
+        {
+            var response = await client.GetAsync(imageUri, HttpCompletionOption.ResponseHeadersRead);
+            if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Found or
+                HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
+            {
+                var location = response.Headers.Location;
+                response.Dispose();
+                if (location is null || redirect == 3)
+                    return Results.Problem("Spotify CDN повернув забагато перенаправлень.", statusCode: StatusCodes.Status502BadGateway);
+
+                var nextUri = location.IsAbsoluteUri ? location : new Uri(imageUri, location);
+                if (!IsSpotifyImageUri(nextUri))
+                    return Results.BadRequest(new { error = "Перенаправлення веде за межі CDN Spotify." });
+                imageUri = nextUri;
+                continue;
+            }
+
+            imageResponse = response;
+            break;
+        }
+
+        if (imageResponse is null || !imageResponse.IsSuccessStatusCode)
+        {
+            var status = imageResponse?.StatusCode ?? HttpStatusCode.BadGateway;
+            imageResponse?.Dispose();
+            return Results.Problem("Не вдалося отримати обкладинку зі Spotify CDN.", statusCode: StatusCodes.Status502BadGateway,
+                extensions: new Dictionary<string, object?> { ["upstreamStatus"] = (int)status });
+        }
+
+        using (imageResponse)
+        {
+            var contentType = imageResponse.Content.Headers.ContentType?.MediaType?.ToLowerInvariant();
+            var extension = contentType switch
+            {
+                "image/jpeg" => ".jpg",
+                "image/png" => ".png",
+                "image/webp" => ".webp",
+                "image/avif" => ".avif",
+                _ => null
+            };
+            if (extension is null)
+                return Results.Problem("Spotify CDN повернув непідтримуваний формат обкладинки.", statusCode: StatusCodes.Status502BadGateway);
+
+            if (imageResponse.Content.Headers.ContentLength is > maxImageBytes)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+
+            await using var source = await imageResponse.Content.ReadAsStreamAsync();
+            using var buffer = new MemoryStream();
+            var chunk = new byte[81920];
+            int read;
+            while ((read = await source.ReadAsync(chunk)) > 0)
+            {
+                if (buffer.Length + read > maxImageBytes)
+                    return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                await buffer.WriteAsync(chunk.AsMemory(0, read));
+            }
+
+            var baseName = SafeDownloadFilePart(request.FileName);
+            return Results.File(buffer.ToArray(), contentType, $"{baseName}{extension}");
+        }
+    }
+    catch (HttpRequestException)
+    {
+        imageResponse?.Dispose();
+        return Results.Problem("Не вдалося отримати обкладинку зі Spotify CDN.", statusCode: StatusCodes.Status502BadGateway);
+    }
+})
+.WithName("DownloadCover")
+.WithDescription("Завантажує обкладинку Spotify з читабельною назвою файла.");
+
 app.MapPost("/api/collection-info", async (TrackRequest request, ISpotifyService spotify) =>
 {
     if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
@@ -192,7 +281,7 @@ app.MapPost("/api/download-collection", async (TrackRequest request, HttpContext
 
                 try
                 {
-                    var entryName = $"{i + 1:00} - {SafeFilePart(track.Artist)} - {SafeFilePart(track.Title)}.mp3";
+                    var entryName = $"{i + 1:00} - {SafeFilePart(track.Title)}.mp3";
                     var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
                     await using var source = File.OpenRead(trackPath);
                     await using var destination = entry.Open();
@@ -258,6 +347,26 @@ static string SafeFilePart(string value)
     var invalidChars = Path.GetInvalidFileNameChars();
     var safe = new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim();
     return string.IsNullOrWhiteSpace(safe) ? "Spotify collection" : safe[..Math.Min(safe.Length, 100)];
+}
+
+static bool IsSpotifyImageUri(Uri uri)
+{
+    var host = uri.Host;
+    var isSpotifyCdn = host.Equals("i.scdn.co", StringComparison.OrdinalIgnoreCase) ||
+                       host.EndsWith(".scdn.co", StringComparison.OrdinalIgnoreCase) ||
+                       host.Equals("spotifycdn.com", StringComparison.OrdinalIgnoreCase) ||
+                       host.EndsWith(".spotifycdn.com", StringComparison.OrdinalIgnoreCase);
+    return uri.Scheme == Uri.UriSchemeHttps && uri.IsDefaultPort && string.IsNullOrEmpty(uri.UserInfo) && isSpotifyCdn;
+}
+
+static string SafeDownloadFilePart(string value)
+{
+    var safe = new string(value
+        .Select(ch => char.IsControl(ch) || "<>:\"/\\|?*".Contains(ch) ? '_' : ch)
+        .ToArray())
+        .Trim()
+        .TrimEnd('.');
+    return string.IsNullOrWhiteSpace(safe) ? "Spotify cover" : safe[..Math.Min(safe.Length, 120)];
 }
 
 app.MapGet("/api/visitors", (HttpContext context, string? vid, VisitorService visitors) =>

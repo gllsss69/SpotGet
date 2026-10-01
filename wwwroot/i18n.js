@@ -6,6 +6,7 @@ const translations = {
         paste: "Paste",
         getTrackInfo: "Get Track Info",
         downloadMp3: "Download MP3",
+        downloadTrack: "Download this track",
         downloadCollection: "Download collection as ZIP",
         partialDownload: "ZIP downloaded, but {count} tracks were skipped. See _download-report.txt inside the archive.",
         album: "Album",
@@ -18,6 +19,7 @@ const translations = {
         errConn: "Could not connect to the server.",
         errDl: "Failed to download the track.",
         errDlGeneric: "An error occurred during download.",
+        errCover: "Could not download the cover image.",
         errEmptyUrl: "The 'url' field cannot be empty.",
         errNotFound: "Track not found on Spotify."
     },
@@ -28,6 +30,7 @@ const translations = {
         paste: "Вставити",
         getTrackInfo: "Отримати інфо",
         downloadMp3: "Завантажити MP3",
+        downloadTrack: "Завантажити цей трек",
         downloadCollection: "Завантажити колекцію ZIP-архівом",
         partialDownload: "ZIP завантажено, але пропущено треків: {count}. Деталі — у _download-report.txt в архіві.",
         album: "Альбом",
@@ -40,6 +43,7 @@ const translations = {
         errConn: "Не вдалося підключитися до сервера.",
         errDl: "Не вдалося завантажити трек.",
         errDlGeneric: "Під час завантаження сталася помилка.",
+        errCover: "Не вдалося завантажити обкладинку.",
         errEmptyUrl: "Поле 'url' не може бути порожнім.",
         errNotFound: "Трек не знайдений на Spotify."
     }

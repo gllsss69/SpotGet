@@ -14,7 +14,9 @@ const resultSection = document.getElementById('resultSection');
 const collectionSection = document.getElementById('collectionSection');
 const collectionTitle = document.getElementById('collectionTitle');
 const collectionType = document.getElementById('collectionType');
+const collectionCoverWrap = document.getElementById('collectionCoverWrap');
 const collectionCover = document.getElementById('collectionCover');
+const downloadCollectionCoverBtn = document.getElementById('downloadCollectionCoverBtn');
 const collectionTrackCount = document.getElementById('collectionTrackCount');
 const collectionTrackList = document.getElementById('collectionTrackList');
 const collectionSpotifyLink = document.getElementById('collectionSpotifyLink');
@@ -198,26 +200,49 @@ downloadCoverBtn.addEventListener('click', async (e) => {
     const src = coverImg.src;
     if (!src) return;
 
-    try {
-        const response = await fetch(src);
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-
-        const fileName = `${trackArtist.textContent || 'Artist'} - ${trackTitle.textContent || 'Track'} (Cover).jpg`;
-
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = blobUrl;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(blobUrl);
-    } catch {
-        // Фолбек: якщо CORS блокує пряме завантаження через blob, відкриваємо картинку в новій вкладці
-        window.open(src, '_blank');
-    }
+    const filename = `${safeFilenamePart(trackArtist.textContent || 'Artist')} - ${safeFilenamePart(trackTitle.textContent || 'Track')} (Cover)`;
+    await downloadCoverImage(src, filename, downloadCoverBtn);
 });
+
+downloadCollectionCoverBtn.addEventListener('click', async () => {
+    const src = currentCollection?.coverUrl;
+    if (!src) return;
+
+    const filename = `${safeFilenamePart(currentCollection.title)} (Cover)`;
+    await downloadCoverImage(src, filename, downloadCollectionCoverBtn);
+});
+
+async function downloadCoverImage(src, filename, button) {
+    button.disabled = true;
+    try {
+        const response = await fetch('/api/download-cover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: src, fileName: filename }),
+        });
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            showError(translateError(data.error || data.detail || translations[currentLang].errCover));
+            return;
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const encodedName = disposition.match(/filename\*=UTF-8''([^;\n]*)/i);
+        anchor.download = encodedName ? decodeURIComponent(encodedName[1]) : `${filename}.jpg`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+        showError(translations[currentLang].errCover);
+    } finally {
+        button.disabled = false;
+    }
+}
 
 // Preview Player
 
@@ -333,6 +358,8 @@ function showCollection(collection) {
     collectionType.textContent = translations[currentLang][collection.type] || collection.type;
     collectionCover.src = collection.coverUrl || '';
     collectionCover.hidden = !collection.coverUrl;
+    collectionCoverWrap.hidden = !collection.coverUrl;
+    collectionCover.alt = `${collection.title} cover`;
     collectionTrackCount.textContent = `${collection.tracks.length} ${translations[currentLang].tracks}`;
     collectionSpotifyLink.href = collection.spotifyUrl || '#';
     collectionTrackList.replaceChildren();
@@ -352,12 +379,28 @@ function showCollection(collection) {
         artist.textContent = track.artist;
         details.append(title, artist);
         row.append(number, details);
+
+        const actions = document.createElement('div');
+        actions.className = 'collection-track-actions';
         if (track.durationMs) {
             const duration = document.createElement('span');
             duration.className = 'collection-track-duration';
             duration.textContent = formatDuration(track.durationMs);
-            row.append(duration);
+            actions.append(duration);
         }
+
+        const downloadButton = document.createElement('button');
+        downloadButton.type = 'button';
+        downloadButton.className = 'collection-track-download';
+        downloadButton.dataset.i18nTitle = 'downloadTrack';
+        downloadButton.dataset.trackTitle = track.title;
+        downloadButton.title = translations[currentLang].downloadTrack;
+        downloadButton.setAttribute('aria-label', `${translations[currentLang].downloadTrack}: ${track.title}`);
+        downloadButton.disabled = !track.spotifyUrl;
+        downloadButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+        downloadButton.addEventListener('click', () => downloadCollectionTrack(track, downloadButton));
+        actions.append(downloadButton);
+        row.append(actions);
         collectionTrackList.append(row);
     });
 
@@ -370,6 +413,51 @@ function refreshDynamicTranslations() {
 
     collectionType.textContent = translations[currentLang][currentCollection.type] || currentCollection.type;
     collectionTrackCount.textContent = `${currentCollection.tracks.length} ${translations[currentLang].tracks}`;
+    collectionTrackList.querySelectorAll('.collection-track-download').forEach(button => {
+        button.setAttribute('aria-label', `${translations[currentLang].downloadTrack}: ${button.dataset.trackTitle}`);
+    });
+}
+
+function safeFilenamePart(value) {
+    return (value || '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').trim() || 'Unknown';
+}
+
+async function downloadCollectionTrack(track, button) {
+    button.disabled = true;
+    button.classList.add('is-loading');
+    button.innerHTML = '<svg class="spinner" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="30 70" stroke-linecap="round"/></svg>';
+    hideError();
+
+    try {
+        const response = await fetch('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: track.spotifyUrl }),
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            showError(translateError(data.error || data.detail || translations[currentLang].errDl));
+            return;
+        }
+
+        const blob = await response.blob();
+        const filename = `${safeFilenamePart(track.artist)} - ${safeFilenamePart(track.title)}.mp3`;
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+        showError(translations[currentLang].errDlGeneric);
+    } finally {
+        button.disabled = false;
+        button.classList.remove('is-loading');
+        button.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+    }
 }
 
 function showArtistInfo(artistInfo) {

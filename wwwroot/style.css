@@ -292,13 +292,30 @@ body {
     margin-bottom: 1rem;
 }
 
-.collection-cover {
+.collection-cover-wrap {
+    position: relative;
     width: 88px;
     height: 88px;
     flex: 0 0 88px;
+}
+
+.collection-cover-wrap[hidden] {
+    display: none;
+}
+
+.collection-cover {
+    width: 88px;
+    height: 88px;
+    display: block;
     object-fit: cover;
     border-radius: var(--radius-sm);
     background: var(--bg-input);
+}
+
+.collection-cover-wrap:hover .download-cover-btn,
+.collection-cover-wrap:focus-within .download-cover-btn {
+    opacity: 1;
+    transform: scale(1);
 }
 
 .collection-heading {
@@ -399,6 +416,43 @@ body {
     padding-left: 0.25rem;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
+}
+
+.collection-track-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.collection-track-download {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(29, 185, 84, 0.35);
+    border-radius: 10px;
+    background: rgba(29, 185, 84, 0.08);
+    color: var(--spotify-green-light);
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.collection-track-download:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: var(--spotify-green);
+    background: rgba(29, 185, 84, 0.2);
+}
+
+.collection-track-download:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.collection-track-download.is-loading {
+    cursor: wait;
 }
 
 .collection-actions {
@@ -502,6 +556,13 @@ body {
 .result-cover:hover .download-cover-btn {
     opacity: 1;
     transform: scale(1);
+}
+
+@media (hover: none) {
+    .download-cover-btn {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 .download-cover-btn:hover {
