@@ -273,18 +273,15 @@ app.MapGet("/api/download-collection/{jobId:guid}/file", (Guid jobId, HttpContex
     }
 
     context.Response.Headers["X-SpotGet-Skipped-Tracks"] = artifact.Skipped.ToString();
-    var stream = new FileStream(artifact.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.DeleteOnClose);
     if (!jobs.TryBeginFileTransfer(jobId))
-    {
-        stream.Dispose();
         return Results.Conflict(new { error = "Архів уже передається або його вже завантажили." });
-    }
+
     context.Response.OnCompleted(() =>
     {
         jobs.MarkFileDelivered(jobId, artifact.Directory);
         return Task.CompletedTask;
     });
-    return Results.File(stream, "application/zip", artifact.FileName);
+    return Results.File(artifact.Path, "application/zip", artifact.FileName);
 });
 
 static bool IsSpotifyImageUri(Uri uri)
