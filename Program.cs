@@ -71,7 +71,14 @@ app.Use(async (context, next) =>
 
 // Статичні файли з wwwroot (HTML/JS/CSS для фронтенду).
 app.UseDefaultFiles();  // index.html як дефолтний документ
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (string.Equals(Path.GetExtension(context.File.Name), ".html", StringComparison.OrdinalIgnoreCase))
+            context.Context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+    }
+});
 
 // Endpoints
 
@@ -234,10 +241,13 @@ app.MapPost("/api/collection-info", async (TrackRequest request, ISpotifyService
 .WithName("GetCollectionInfo")
 .WithDescription("Повертає список треків Spotify-альбому або плейліста.");
 
-app.MapPost("/api/download-collection", (TrackRequest request, CollectionDownloadJobService jobs) =>
+app.MapPost("/api/download-collection", (TrackRequest request, HttpContext context, CollectionDownloadJobService jobs) =>
 {
     if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
         return Results.BadRequest(new { error = "Посилання не може бути порожнім або занадто довгим." });
+
+    if (!context.Request.Headers.Accept.ToString().Contains("application/json", StringComparison.OrdinalIgnoreCase))
+        return Results.Conflict(new { error = "Оновіть сторінку перед початком завантаження." });
 
     try
     {

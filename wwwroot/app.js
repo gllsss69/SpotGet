@@ -113,7 +113,7 @@ downloadCollectionBtn.addEventListener('click', async () => {
     try {
         const startResponse = await fetch('/api/download-collection', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ url }),
         });
         if (!startResponse.ok) {
