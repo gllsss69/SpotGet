@@ -8,6 +8,10 @@ const btnText = submitBtn.querySelector('.btn-text');
 const btnLoader = submitBtn.querySelector('.btn-loader');
 
 const errorSection = document.getElementById('errorSection');
+const downloadNotification = document.getElementById('downloadNotification');
+const downloadNotificationMessage = document.getElementById('downloadNotificationMessage');
+let downloadNotificationTimeout;
+let downloadNotificationHideTimeout;
 const errorMessage = document.getElementById('errorMessage');
 
 const resultSection = document.getElementById('resultSection');
@@ -127,6 +131,7 @@ downloadCollectionBtn.addEventListener('click', async () => {
         anchor.click();
         anchor.remove();
         URL.revokeObjectURL(blobUrl);
+        showDownloadNotification(filename);
 
         const skippedTracks = Number(response.headers.get('X-SpotGet-Skipped-Tracks') || 0);
         if (skippedTracks > 0) {
@@ -185,6 +190,7 @@ downloadBtn.addEventListener('click', async () => {
         a.click();
         window.URL.revokeObjectURL(downloadUrl);
         a.remove();
+        showDownloadNotification(filename);
 
     } catch (err) {
         showError(translations[currentLang].errDlGeneric);
@@ -237,6 +243,7 @@ async function downloadCoverImage(src, filename, button) {
         anchor.click();
         anchor.remove();
         window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        showDownloadNotification(anchor.download);
     } catch {
         showError(translations[currentLang].errCover);
     } finally {
@@ -315,6 +322,21 @@ function showWarning(message) {
     errorSection.classList.add('warning');
     errorMessage.textContent = message;
     errorSection.hidden = false;
+}
+
+function showDownloadNotification(filename) {
+    window.clearTimeout(downloadNotificationTimeout);
+    window.clearTimeout(downloadNotificationHideTimeout);
+    downloadNotification.classList.remove('is-hiding');
+    downloadNotificationMessage.textContent = translations[currentLang].downloadStarted.replace('{filename}', filename);
+    downloadNotification.hidden = false;
+    downloadNotificationTimeout = window.setTimeout(() => {
+        downloadNotification.classList.add('is-hiding');
+        downloadNotificationHideTimeout = window.setTimeout(() => {
+            downloadNotification.hidden = true;
+            downloadNotification.classList.remove('is-hiding');
+        }, 180);
+    }, 4500);
 }
 
 function hideError() {
@@ -451,6 +473,7 @@ async function downloadCollectionTrack(track, button) {
         anchor.click();
         anchor.remove();
         window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        showDownloadNotification(filename);
     } catch {
         showError(translations[currentLang].errDlGeneric);
     } finally {

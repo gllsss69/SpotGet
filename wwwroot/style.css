@@ -251,7 +251,7 @@ body {
     color: #fca5a5;
     font-size: 0.9rem;
     margin-bottom: 2rem;
-    animation: slide-in 0.35s var(--transition-smooth);
+    animation: slide-in 0.35s var(--transition-smooth) backwards;
 }
 
 .error-card svg {
@@ -269,6 +269,62 @@ body {
     color: #f59e0b;
 }
 
+.download-notification {
+    position: fixed;
+    z-index: 20;
+    right: max(1.25rem, env(safe-area-inset-right));
+    bottom: max(1.25rem, env(safe-area-inset-bottom));
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    max-width: min(28rem, calc(100vw - 2rem));
+    padding: 0.9rem 1.1rem;
+    color: #bbf7d0;
+    background: rgba(15, 35, 25, 0.96);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    border-radius: var(--radius-md);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+    font-size: 0.9rem;
+    animation: notification-in 0.2s var(--transition-smooth) both;
+}
+
+.download-notification.is-hiding {
+    animation: notification-out 0.18s ease-in both;
+}
+
+.download-notification svg {
+    flex: 0 0 auto;
+    color: #22c55e;
+}
+
+.download-notification[hidden] {
+    display: none;
+}
+
+@keyframes notification-in {
+    from {
+        opacity: 0;
+        translate: 0 8px;
+    }
+
+    to {
+        opacity: 1;
+        translate: 0 0;
+    }
+}
+
+@keyframes notification-out {
+    from {
+        opacity: 1;
+        translate: 0 0;
+    }
+
+    to {
+        opacity: 0;
+        translate: 0 8px;
+    }
+}
+
 /* Album and playlist results */
 .collection-card {
     position: relative;
@@ -278,7 +334,7 @@ body {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    animation: slide-in 0.35s var(--transition-smooth);
+    animation: slide-in 0.35s var(--transition-smooth) backwards;
 }
 
 .collection-card[hidden] {
@@ -489,7 +545,7 @@ body {
     border-radius: var(--radius-lg);
     padding: 1.5rem;
     backdrop-filter: blur(12px);
-    animation: slide-in 0.5s var(--transition-smooth);
+    animation: slide-in 0.5s var(--transition-smooth) backwards;
     transition: background var(--transition-fast);
 }
 
@@ -727,7 +783,7 @@ body {
     border: 1px solid var(--card-border);
     border-radius: var(--radius-lg);
     margin-top: 1rem;
-    animation: fadeUp var(--transition-base) ease-out;
+    animation: slide-in 0.35s var(--transition-smooth) backwards;
 }
 
 .artist-card[hidden] {
