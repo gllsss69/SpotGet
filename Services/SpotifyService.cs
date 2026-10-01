@@ -18,6 +18,9 @@ public partial class SpotifyService : ISpotifyService
     private readonly ILogger<SpotifyService> _logger;
     private readonly IMemoryCache _cache;
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
+    private const int PlaylistPageSize = 100;
+    private const int MaxPlaylistTracks = 1000;
+    private const string FetchPlaylistQueryHash = "91d4c2bc3e0cd1bc672281c4f1f59f43ff55ba726ca04a45810d99bd091f3f0e";
 
     // Пул User-Agent рядків для ротації при запитах до Spotify.
     private static readonly string[] UserAgents =
@@ -168,7 +171,7 @@ public partial class SpotifyService : ISpotifyService
 
         var type = match.Groups["type"].Value.ToLowerInvariant();
         var id = match.Groups["id"].Value;
-        var cacheKey = $"collection:v7:{type}:{id}";
+        var cacheKey = $"collection:v8:{type}:{id}";
         if (_cache.TryGetValue(cacheKey, out SpotCollectionDto? cached) && cached is not null)
             return cached;
 
@@ -215,42 +218,47 @@ public partial class SpotifyService : ISpotifyService
         var coverUrl = FindCoverUrl(entity) ?? metadata.GetValueOrDefault("og:image");
         if (string.IsNullOrWhiteSpace(coverUrl))
             coverUrl = await FetchOEmbedThumbnailAsync(canonicalUrl);
-        var tracks = new List<SpotTrackDto>();
+        var tracks = type == "playlist"
+            ? await FetchPlaylistTracksAsync(id)
+            : new List<SpotTrackDto>();
 
         var trackNumber = 0u;
-        foreach (var item in trackList.Value.EnumerateArray())
+        if (type == "album")
         {
-            var track = item;
-            if (TryGetProperty(item, "track", out var nestedTrack) && nestedTrack.ValueKind == JsonValueKind.Object)
-                track = nestedTrack;
-
-            var trackTitle = GetString(track, "title", "name");
-            if (string.IsNullOrWhiteSpace(trackTitle))
-                continue;
-
-            trackNumber++;
-
-            var artists = GetArtists(track);
-            var uri = GetString(track, "uri", "spotifyUri", "id") ?? string.Empty;
-            var trackId = uri.StartsWith("spotify:track:", StringComparison.OrdinalIgnoreCase)
-                ? uri["spotify:track:".Length..]
-                : uri;
-            var trackUrl = trackId.Length == 22
-                ? $"https://open.spotify.com/track/{trackId}"
-                : canonicalUrl;
-
-            tracks.Add(new SpotTrackDto
+            foreach (var item in trackList.Value.EnumerateArray())
             {
-                Title = trackTitle,
-                Artist = artists,
-                Album = type == "album" ? title : GetAlbumName(track),
-                CoverUrl = FindCoverUrl(track) ?? (type == "album" ? coverUrl : null),
-                DurationMs = GetDurationMs(track),
-                TrackNumber = GetUInt32(track, "trackNumber", "track_number") is var explicitNumber && explicitNumber > 0
-                    ? explicitNumber
-                    : trackNumber,
-                SpotifyUrl = trackUrl
-            });
+                var track = item;
+                if (TryGetProperty(item, "track", out var nestedTrack) && nestedTrack.ValueKind == JsonValueKind.Object)
+                    track = nestedTrack;
+
+                var trackTitle = GetString(track, "title", "name");
+                if (string.IsNullOrWhiteSpace(trackTitle))
+                    continue;
+
+                trackNumber++;
+
+                var artists = GetArtists(track);
+                var uri = GetString(track, "uri", "spotifyUri", "id") ?? string.Empty;
+                var trackId = uri.StartsWith("spotify:track:", StringComparison.OrdinalIgnoreCase)
+                    ? uri["spotify:track:".Length..]
+                    : uri;
+                var trackUrl = trackId.Length == 22
+                    ? $"https://open.spotify.com/track/{trackId}"
+                    : canonicalUrl;
+
+                tracks.Add(new SpotTrackDto
+                {
+                    Title = trackTitle,
+                    Artist = artists,
+                    Album = title,
+                    CoverUrl = FindCoverUrl(track) ?? coverUrl,
+                    DurationMs = GetDurationMs(track),
+                    TrackNumber = GetUInt32(track, "trackNumber", "track_number") is var explicitNumber && explicitNumber > 0
+                        ? explicitNumber
+                        : trackNumber,
+                    SpotifyUrl = trackUrl
+                });
+            }
         }
 
         if (tracks.Count == 0)
@@ -285,6 +293,136 @@ public partial class SpotifyService : ISpotifyService
         };
         _cache.Set(cacheKey, result, CacheDuration);
         return result;
+    }
+
+    private async Task<List<SpotTrackDto>> FetchPlaylistTracksAsync(string playlistId)
+    {
+        var accessToken = await GetEmbedAccessTokenAsync();
+        var tracks = new List<SpotTrackDto>(MaxPlaylistTracks);
+        var totalCount = int.MaxValue;
+
+        for (var offset = 0; offset < Math.Min(totalCount, MaxPlaylistTracks); offset += PlaylistPageSize)
+        {
+            var variables = JsonSerializer.Serialize(new
+            {
+                uri = $"spotify:playlist:{playlistId}",
+                offset,
+                limit = PlaylistPageSize
+            });
+            var extensions = JsonSerializer.Serialize(new
+            {
+                persistedQuery = new { version = 1, sha256Hash = FetchPlaylistQueryHash }
+            });
+            var url = "https://api-partner.spotify.com/pathfinder/v1/query" +
+                      $"?operationName=fetchPlaylist&variables={Uri.EscapeDataString(variables)}" +
+                      $"&extensions={Uri.EscapeDataString(extensions)}";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.Accept.ParseAdd("application/json");
+            request.Headers.UserAgent.ParseAdd("Mozilla/5.0");
+
+            using var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException($"Не вдалося отримати сторінку {offset / PlaylistPageSize + 1} плейліста Spotify (HTTP {(int)response.StatusCode}).");
+
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            if (!TryGetProperty(document.RootElement, "data", out var data) ||
+                !TryGetProperty(data, "playlistV2", out var playlist) ||
+                !TryGetProperty(playlist, "content", out var content) ||
+                !TryGetProperty(content, "items", out var items) || items.ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException("Spotify повернув список плейліста у невідомому форматі.");
+
+            if (TryGetProperty(content, "totalCount", out var total) && total.TryGetInt32(out var parsedTotal))
+                totalCount = parsedTotal;
+
+            foreach (var item in items.EnumerateArray())
+            {
+                if (!TryGetProperty(item, "itemV2", out var wrapper) ||
+                    !TryGetProperty(wrapper, "data", out var track) || track.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var title = GetString(track, "name");
+                var uri = GetString(track, "uri");
+                if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(uri) ||
+                    !uri.StartsWith("spotify:track:", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var trackId = uri["spotify:track:".Length..];
+                var artists = GetPathfinderArtists(track);
+                var album = TryGetProperty(track, "albumOfTrack", out var albumData) ? albumData : default;
+                var cover = album.ValueKind == JsonValueKind.Object ? FindCoverUrl(album) : null;
+
+                tracks.Add(new SpotTrackDto
+                {
+                    Title = title,
+                    Artist = artists,
+                    Album = album.ValueKind == JsonValueKind.Object ? GetString(album, "name") ?? string.Empty : string.Empty,
+                    CoverUrl = cover,
+                    DurationMs = GetDurationMs(track),
+                    TrackNumber = GetUInt32(track, "trackNumber"),
+                    SpotifyUrl = $"https://open.spotify.com/track/{trackId}"
+                });
+            }
+
+            if (items.GetArrayLength() == 0)
+                break;
+        }
+
+        if (tracks.Count == 0)
+            throw new InvalidOperationException("У цьому плейлісті не знайдено доступних треків.");
+
+        if (totalCount > MaxPlaylistTracks)
+            _logger.LogInformation("Плейліст {PlaylistId} має {TotalCount} треків; показано перші {MaxTracks}", playlistId, totalCount, MaxPlaylistTracks);
+
+        return tracks;
+    }
+
+    private async Task<string> GetEmbedAccessTokenAsync()
+    {
+        const string cacheKey = "spotify:embed-access-token";
+        if (_cache.TryGetValue(cacheKey, out string? cachedToken) && !string.IsNullOrWhiteSpace(cachedToken))
+            return cachedToken;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://open.spotify.com/embed/api/token");
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.UserAgent.ParseAdd("Mozilla/5.0");
+        using var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var token = GetString(document.RootElement, "accessToken");
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Spotify не повернув токен для читання плейліста.");
+
+        var lifetime = TimeSpan.FromMinutes(5);
+        if (TryGetProperty(document.RootElement, "accessTokenExpirationTimestampMs", out var expiry) &&
+            expiry.TryGetInt64(out var expiryMs))
+        {
+            var remaining = DateTimeOffset.FromUnixTimeMilliseconds(expiryMs) - DateTimeOffset.UtcNow - TimeSpan.FromSeconds(30);
+            if (remaining > TimeSpan.Zero)
+                lifetime = remaining;
+        }
+
+        _cache.Set(cacheKey, token, lifetime);
+        return token;
+    }
+
+    private static string GetPathfinderArtists(JsonElement track)
+    {
+        if (!TryGetProperty(track, "artists", out var artists) ||
+            !TryGetProperty(artists, "items", out var items) || items.ValueKind != JsonValueKind.Array)
+            return "Unknown artist";
+
+        var names = new List<string>();
+        foreach (var artist in items.EnumerateArray())
+        {
+            if (TryGetProperty(artist, "profile", out var profile) &&
+                GetString(profile, "name") is { Length: > 0 } name)
+                names.Add(name);
+        }
+
+        return names.Count > 0 ? string.Join(", ", names) : "Unknown artist";
     }
 
     private static JsonElement? FindTrackList(JsonElement element)
@@ -511,6 +649,10 @@ public partial class SpotifyService : ISpotifyService
     {
         if (TryGetProperty(track, "duration_ms", out var milliseconds) && milliseconds.TryGetInt32(out var ms))
             return ms;
+        if (TryGetProperty(track, "trackDuration", out var trackDuration) &&
+            TryGetProperty(trackDuration, "totalMilliseconds", out var trackMilliseconds) &&
+            trackMilliseconds.TryGetInt32(out var trackMs))
+            return trackMs;
         if (TryGetProperty(track, "duration", out var duration))
         {
             if (duration.ValueKind == JsonValueKind.Number && duration.TryGetInt32(out var durationNumber))
