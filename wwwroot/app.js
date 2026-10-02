@@ -52,6 +52,15 @@ const artistDescription = document.getElementById('artistDescription');
 const artistLink        = document.getElementById('artistLink');
 const artistLinkLabel   = document.getElementById('artistLinkLabel');
 
+const topBar = document.querySelector('.top-right-actions');
+const heroTitle = document.querySelector('.hero .logo h1');
+if (topBar && heroTitle && 'IntersectionObserver' in window) {
+    const titleObserver = new IntersectionObserver(([entry]) => {
+        topBar.classList.toggle('is-scrolled', !entry.isIntersecting);
+    }, { rootMargin: '-56px 0px 0px 0px', threshold: 0 });
+    titleObserver.observe(heroTitle);
+}
+
 let currentAudio = null;
 let isPlaying = false;
 let currentCollection = null;

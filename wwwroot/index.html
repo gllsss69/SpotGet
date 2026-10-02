@@ -12,13 +12,64 @@
     <link rel="stylesheet" href="style.css?v=16" />
     <style>
         .top-right-actions {
-            position: absolute;
-            top: 20px;
-            right: 20px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
             z-index: 100;
             display: flex;
             align-items: center;
+            justify-content: flex-end;
             gap: 12px;
+            min-height: 56px;
+            padding: 8px 20px;
+            background: rgba(18, 18, 22, 0.58);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        .topbar-brand {
+            display: inline-flex;
+            align-items: center;
+            margin-right: auto;
+            padding: 4px 8px;
+            color: var(--spotify-green-light);
+            font-size: 1.3rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            text-decoration: none;
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: opacity 0.28s ease, transform 0.2s ease, filter 0.2s ease, text-shadow 0.2s ease;
+            pointer-events: none;
+        }
+
+        .top-right-actions.is-scrolled .topbar-brand {
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+
+        .topbar-brand:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.2);
+            text-shadow: 0 0 14px rgba(30, 215, 96, 0.55);
+        }
+
+        .topbar-brand:active {
+            transform: translateY(0) scale(0.98);
+            filter: brightness(1.35);
+        }
+
+        .topbar-brand:focus-visible {
+            outline: 2px solid var(--spotify-green-light);
+            outline-offset: 2px;
+            border-radius: 6px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .topbar-brand { transition: none; }
         }
 
         .github-link {
@@ -99,10 +150,11 @@
     </style>
 </head>
 
-<body>
+<body id="top">
     <div class="bg-glow"></div>
 
     <div class="top-right-actions">
+        <a class="topbar-brand" href="#top" aria-label="SpotGet — back to top">SpotGet</a>
         <div class="visitor-badge" title="Unique visitors">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
@@ -294,7 +346,7 @@
     </footer>
 
     <script src="i18n.js?v=12"></script>
-    <script src="app.js?v=18"></script>
+    <script src="app.js?v=19"></script>
 </body>
 
 </html>
