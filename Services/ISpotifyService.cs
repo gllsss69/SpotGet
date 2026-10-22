@@ -12,15 +12,15 @@ public interface ISpotifyService
     /// </summary>
     /// <param name="spotifyUrl">Повне посилання на трек (https://open.spotify.com/track/...).</param>
     /// <returns>Об'єкт SpotTrackDto з метаданими.</returns>
-    Task<SpotTrackDto> GetTrackInfoAsync(string spotifyUrl);
+    Task<SpotTrackDto> GetTrackInfoAsync(string spotifyUrl, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the album cover URL for a Spotify track without fetching its other metadata.
     /// </summary>
-    Task<string?> GetTrackCoverUrlAsync(string spotifyUrl);
+    Task<string?> GetTrackCoverUrlAsync(string spotifyUrl, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the track list for a Spotify album or playlist URL.
     /// </summary>
-    Task<SpotCollectionDto> GetCollectionInfoAsync(string spotifyUrl);
+    Task<SpotCollectionDto> GetCollectionInfoAsync(string spotifyUrl, CancellationToken cancellationToken = default);
 }

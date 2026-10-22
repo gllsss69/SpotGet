@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using SpotGet.Models;
@@ -15,7 +16,7 @@ public interface IDownloadService
     /// Знаходить трек на YouTube, завантажує його, конвертує в MP3 та додає ID3-теги.
     /// Повертає шлях до тимчасового файлу.
     /// </summary>
-    Task<string> DownloadAndTagTrackAsync(SpotTrackDto track);
+    Task<string> DownloadAndTagTrackAsync(SpotTrackDto track, CancellationToken cancellationToken = default);
 }
 
 public class YtDlpDownloadService : IDownloadService
@@ -29,7 +30,7 @@ public class YtDlpDownloadService : IDownloadService
         _logger = logger;
     }
 
-    public async Task<string> DownloadAndTagTrackAsync(SpotTrackDto track)
+    public async Task<string> DownloadAndTagTrackAsync(SpotTrackDto track, CancellationToken cancellationToken = default)
     {
         var searchQuery = $"{track.Artist} - {track.Title}";
         _logger.LogInformation("Шукаємо на YouTube через yt-dlp: {Query}", searchQuery);
@@ -53,7 +54,8 @@ public class YtDlpDownloadService : IDownloadService
             var downloadCookiesPath = hasCookies ? cookiesPath : null;
 
             // Try candidates in duration order. A failed video should not stop the track download.
-            var candidateUrls = await FindYoutubeMatchesAsync(searchQuery, track, downloadCookiesPath);
+            cancellationToken.ThrowIfCancellationRequested();
+            var candidateUrls = await FindYoutubeMatchesAsync(searchQuery, track, downloadCookiesPath, cancellationToken);
             if (candidateUrls.Count == 0)
                 candidateUrls.Add($"ytsearch1:{searchQuery}");
 
@@ -63,7 +65,7 @@ public class YtDlpDownloadService : IDownloadService
                 _logger.LogInformation("Завантажуємо YouTube-кандидат (cookies={HasCookies}): {VideoUrl}",
                     downloadCookiesPath is not null, videoUrl);
 
-                var result = await RunProcessAsync("yt-dlp", candidateArgs, timeoutSeconds: 120);
+                var result = await RunProcessAsync("yt-dlp", candidateArgs, timeoutSeconds: 120, cancellationToken);
                 if (result.ExitCode != 0 && downloadCookiesPath is not null && IsCookieRelatedError(result.Stderr))
                 {
                     _logger.LogWarning("Cookies явно недійсні або ротовані. Повторюємо без них.");
@@ -71,7 +73,7 @@ public class YtDlpDownloadService : IDownloadService
 
                     downloadCookiesPath = null;
                     candidateArgs = BuildYtDlpArgs(videoUrl, outputTemplate, cookiesPath: null);
-                    result = await RunProcessAsync("yt-dlp", candidateArgs, timeoutSeconds: 120);
+                    result = await RunProcessAsync("yt-dlp", candidateArgs, timeoutSeconds: 120, cancellationToken);
                 }
 
                 return result;
@@ -139,7 +141,7 @@ public class YtDlpDownloadService : IDownloadService
 
             // Додаємо ID3-теги
             _logger.LogInformation("Додавання ID3-тегів для {Title}", track.Title);
-            await AddTagsAsync(expectedMp3, track);
+            await AddTagsAsync(expectedMp3, track, cancellationToken);
 
             return expectedMp3;
         }
@@ -154,16 +156,16 @@ public class YtDlpDownloadService : IDownloadService
     /// <summary>
     /// Шукає кілька відео-кандидатів і вибирає результат із найближчою тривалістю.
     /// </summary>
-    private async Task<List<string>> FindYoutubeMatchesAsync(string searchQuery, SpotTrackDto track, string? cookiesPath)
+    private async Task<List<string>> FindYoutubeMatchesAsync(string searchQuery, SpotTrackDto track, string? cookiesPath, CancellationToken cancellationToken)
     {
         var args = BuildYtDlpSearchArgs(searchQuery, cookiesPath);
 
-        var (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", args, timeoutSeconds: 120);
+        var (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", args, timeoutSeconds: 120, cancellationToken);
         if (exitCode != 0 && cookiesPath is not null && IsCookieRelatedError(stderr))
         {
             _logger.LogWarning("Не вдалося шукати з cookies; повторюємо без них. stderr: {Stderr}", stderr);
             args = BuildYtDlpSearchArgs(searchQuery, cookiesPath: null);
-            (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", args, timeoutSeconds: 120);
+            (exitCode, stdout, stderr) = await RunProcessAsync("yt-dlp", args, timeoutSeconds: 120, cancellationToken);
         }
 
         if (exitCode != 0)
@@ -321,7 +323,7 @@ public class YtDlpDownloadService : IDownloadService
         ? "youtube:player-client=android,mweb,web_safari,web_embedded"
         : "youtube:player-client=mweb,web_safari,web_embedded";
 
-    private async Task AddTagsAsync(string filePath, SpotTrackDto track)
+    private async Task AddTagsAsync(string filePath, SpotTrackDto track, CancellationToken cancellationToken)
     {
         using var file = TagLib.File.Create(filePath);
 
@@ -339,9 +341,9 @@ public class YtDlpDownloadService : IDownloadService
         {
             try
             {
-                using var coverResponse = await _httpClient.GetAsync(track.CoverUrl);
+                using var coverResponse = await _httpClient.GetAsync(track.CoverUrl, cancellationToken);
                 coverResponse.EnsureSuccessStatusCode();
-                var coverBytes = await coverResponse.Content.ReadAsByteArrayAsync();
+                var coverBytes = await coverResponse.Content.ReadAsByteArrayAsync(cancellationToken);
                 var mimeType = GetImageMimeType(coverResponse.Content.Headers.ContentType?.MediaType, coverBytes);
                 if (mimeType is null)
                 {
@@ -359,6 +361,7 @@ public class YtDlpDownloadService : IDownloadService
                 };
                 file.Tag.Pictures = new TagLib.IPicture[] { picture };
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Не вдалося завантажити обкладинку для тегів");
@@ -392,7 +395,7 @@ public class YtDlpDownloadService : IDownloadService
     }
 
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
-        string fileName, List<string> arguments, int timeoutSeconds = 60)
+        string fileName, List<string> arguments, int timeoutSeconds = 60, CancellationToken cancellationToken = default)
     {
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
@@ -423,7 +426,8 @@ public class YtDlpDownloadService : IDownloadService
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
         try
         {
@@ -432,6 +436,7 @@ public class YtDlpDownloadService : IDownloadService
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+            cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException($"yt-dlp не завершився за {timeoutSeconds} секунд.");
         }
 

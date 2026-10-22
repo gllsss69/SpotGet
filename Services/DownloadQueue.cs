@@ -21,12 +21,12 @@ public class DownloadQueue
     /// Виконує задачу завантаження в рамках обмеження.
     /// Якщо всі слоти зайняті, запит чекає своєї черги.
     /// </summary>
-    public async Task<T> EnqueueAsync<T>(Func<Task<T>> work, CancellationToken ct = default)
+    public async Task<T> EnqueueAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct = default)
     {
         await _semaphore.WaitAsync(ct);
         try
         {
-            return await work();
+            return await work(ct);
         }
         finally
         {

@@ -69,7 +69,7 @@ public partial class SpotifyService : ISpotifyService
     }
 
     /// <inheritdoc />
-    public async Task<SpotTrackDto> GetTrackInfoAsync(string spotifyUrl)
+    public async Task<SpotTrackDto> GetTrackInfoAsync(string spotifyUrl, CancellationToken cancellationToken = default)
     {
         var trackId = ParseTrackId(spotifyUrl);
         var cacheKey = $"track:{trackId}";
@@ -85,10 +85,10 @@ public partial class SpotifyService : ISpotifyService
         _logger.LogInformation("Fetching metadata for track {TrackId}", trackId);
 
         // Крок 1: oEmbed API (назва + обкладинка, дає 404 для неіснуючих треків)
-        var oembed = await FetchOEmbedAsync(trackId);
+        var oembed = await FetchOEmbedAsync(trackId, cancellationToken);
 
         // Крок 2: HTML meta-теги (артист, альбом, тривалість)
-        var meta = await FetchHtmlMetaAsync(trackId);
+        var meta = await FetchHtmlMetaAsync(trackId, cancellationToken);
 
         // Парсимо артиста та альбом з og:description (формат: "Artist · Album · Song · Year")
         var artist = meta.GetValueOrDefault("music:musician_description", "");
@@ -116,8 +116,9 @@ public partial class SpotifyService : ISpotifyService
         {
             try
             {
-                artistInfo = await FetchArtistInfoAsync(artistUrl);
+                artistInfo = await FetchArtistInfoAsync(artistUrl, cancellationToken: cancellationToken);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Не вдалося отримати інформацію про виконавця");
@@ -140,7 +141,7 @@ public partial class SpotifyService : ISpotifyService
         return result;
     }
 
-    public async Task<string?> GetTrackCoverUrlAsync(string spotifyUrl)
+    public async Task<string?> GetTrackCoverUrlAsync(string spotifyUrl, CancellationToken cancellationToken = default)
     {
         var trackId = ParseTrackId(spotifyUrl);
         if (_cache.TryGetValue($"track:{trackId}", out SpotTrackDto? track) && track is not null)
@@ -150,7 +151,7 @@ public partial class SpotifyService : ISpotifyService
         if (_cache.TryGetValue(cacheKey, out string? cachedCoverUrl))
             return cachedCoverUrl;
 
-        var metadata = await FetchHtmlMetaAsync(trackId);
+        var metadata = await FetchHtmlMetaAsync(trackId, cancellationToken);
         var coverUrl = metadata.GetValueOrDefault("og:image");
         if (!string.IsNullOrWhiteSpace(coverUrl))
             _cache.Set(cacheKey, coverUrl, CacheDuration);
@@ -159,7 +160,7 @@ public partial class SpotifyService : ISpotifyService
     }
 
     /// <inheritdoc />
-    public async Task<SpotCollectionDto> GetCollectionInfoAsync(string spotifyUrl)
+    public async Task<SpotCollectionDto> GetCollectionInfoAsync(string spotifyUrl, CancellationToken cancellationToken = default)
     {
         if (!Uri.TryCreate(spotifyUrl, UriKind.Absolute, out var parsedUrl) ||
             !string.Equals(parsedUrl.Host, "open.spotify.com", StringComparison.OrdinalIgnoreCase))
@@ -181,13 +182,13 @@ public partial class SpotifyService : ISpotifyService
         request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
         request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml");
 
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
             throw new ArgumentException("Альбом або плейліст не знайдений чи недоступний.");
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException($"Spotify повернув помилку (HTTP {(int)response.StatusCode}).");
 
-        var html = await response.Content.ReadAsStringAsync();
+        var html = await response.Content.ReadAsStringAsync(cancellationToken);
         var jsonMatch = NextDataRegex().Match(html);
         if (!jsonMatch.Success)
             throw new InvalidOperationException("Spotify не повернув список треків. Спробуйте пізніше.");
@@ -207,8 +208,9 @@ public partial class SpotifyService : ISpotifyService
         {
             try
             {
-                await EnrichPlaylistCreatorInfoAsync(canonicalUrl, creatorInfos[0]);
+                await EnrichPlaylistCreatorInfoAsync(canonicalUrl, creatorInfos[0], cancellationToken);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Не вдалося отримати аватар автора плейлиста {PlaylistId}", id);
@@ -217,9 +219,9 @@ public partial class SpotifyService : ISpotifyService
 
         var coverUrl = FindCoverUrl(entity) ?? metadata.GetValueOrDefault("og:image");
         if (string.IsNullOrWhiteSpace(coverUrl))
-            coverUrl = await FetchOEmbedThumbnailAsync(canonicalUrl);
+            coverUrl = await FetchOEmbedThumbnailAsync(canonicalUrl, cancellationToken);
         var tracks = type == "playlist"
-            ? await FetchPlaylistTracksAsync(id)
+            ? await FetchPlaylistTracksAsync(id, cancellationToken)
             : new List<SpotTrackDto>();
 
         var trackNumber = 0u;
@@ -272,9 +274,10 @@ public partial class SpotifyService : ISpotifyService
         {
             try
             {
-                var firstTrackInfo = await GetTrackInfoAsync(tracks[0].SpotifyUrl);
+                var firstTrackInfo = await GetTrackInfoAsync(tracks[0].SpotifyUrl, cancellationToken);
                 artistInfo = firstTrackInfo.ArtistInfo;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Не вдалося отримати профіль виконавця першого треку колекції {CollectionId}", id);
@@ -295,9 +298,9 @@ public partial class SpotifyService : ISpotifyService
         return result;
     }
 
-    private async Task<List<SpotTrackDto>> FetchPlaylistTracksAsync(string playlistId)
+    private async Task<List<SpotTrackDto>> FetchPlaylistTracksAsync(string playlistId, CancellationToken cancellationToken)
     {
-        var accessToken = await GetEmbedAccessTokenAsync();
+        var accessToken = await GetEmbedAccessTokenAsync(cancellationToken);
         var tracks = new List<SpotTrackDto>(MaxPlaylistTracks);
         var totalCount = int.MaxValue;
 
@@ -322,11 +325,11 @@ public partial class SpotifyService : ISpotifyService
             request.Headers.Accept.ParseAdd("application/json");
             request.Headers.UserAgent.ParseAdd("Mozilla/5.0");
 
-            using var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 throw new HttpRequestException($"Не вдалося отримати сторінку {offset / PlaylistPageSize + 1} плейліста Spotify (HTTP {(int)response.StatusCode}).");
 
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
             if (!TryGetProperty(document.RootElement, "data", out var data) ||
                 !TryGetProperty(data, "playlistV2", out var playlist) ||
                 !TryGetProperty(playlist, "content", out var content) ||
@@ -378,7 +381,7 @@ public partial class SpotifyService : ISpotifyService
         return tracks;
     }
 
-    private async Task<string> GetEmbedAccessTokenAsync()
+    private async Task<string> GetEmbedAccessTokenAsync(CancellationToken cancellationToken)
     {
         const string cacheKey = "spotify:embed-access-token";
         if (_cache.TryGetValue(cacheKey, out string? cachedToken) && !string.IsNullOrWhiteSpace(cachedToken))
@@ -387,10 +390,10 @@ public partial class SpotifyService : ISpotifyService
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://open.spotify.com/embed/api/token");
         request.Headers.Accept.ParseAdd("application/json");
         request.Headers.UserAgent.ParseAdd("Mozilla/5.0");
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var token = GetString(document.RootElement, "accessToken");
         if (string.IsNullOrWhiteSpace(token))
             throw new InvalidOperationException("Spotify не повернув токен для читання плейліста.");
@@ -688,10 +691,10 @@ public partial class SpotifyService : ISpotifyService
     /// Запитує Spotify oEmbed API. Повертає назву треку та thumbnail.
     /// Кидає виняток якщо трек не знайдений (404).
     /// </summary>
-    private async Task<OEmbedResult> FetchOEmbedAsync(string trackId)
+    private async Task<OEmbedResult> FetchOEmbedAsync(string trackId, CancellationToken cancellationToken)
     {
         var oembedUrl = $"https://open.spotify.com/oembed?url=https://open.spotify.com/track/{trackId}";
-        var response = await _httpClient.GetAsync(oembedUrl);
+        using var response = await _httpClient.GetAsync(oembedUrl, cancellationToken);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
             throw new ArgumentException(
@@ -705,7 +708,7 @@ public partial class SpotifyService : ISpotifyService
         }
 
         using var doc = await JsonDocument.ParseAsync(
-            await response.Content.ReadAsStreamAsync());
+            await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
 
         var root = doc.RootElement;
 
@@ -718,19 +721,21 @@ public partial class SpotifyService : ISpotifyService
         };
     }
 
-    private async Task<string?> FetchOEmbedThumbnailAsync(string spotifyUrl)
+    private async Task<string?> FetchOEmbedThumbnailAsync(string spotifyUrl, CancellationToken cancellationToken)
     {
         try
         {
             var oembedUrl = $"https://open.spotify.com/oembed?url={Uri.EscapeDataString(spotifyUrl)}";
-            using var response = await _httpClient.GetAsync(oembedUrl);
+            using var response = await _httpClient.GetAsync(oembedUrl, cancellationToken);
             if (!response.IsSuccessStatusCode) return null;
 
-            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+            using var doc = await JsonDocument.ParseAsync(
+                await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
             return doc.RootElement.TryGetProperty("thumbnail_url", out var thumbnail)
                 ? thumbnail.GetString()
                 : null;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Не вдалося отримати обкладинку колекції через Spotify oEmbed");
@@ -742,7 +747,7 @@ public partial class SpotifyService : ISpotifyService
     /// Завантажує HTML-сторінку треку з User-Agent Googlebot
     /// (Spotify віддає мета-теги тільки ботам) і парсить &lt;meta&gt; теги.
     /// </summary>
-    private async Task<Dictionary<string, string>> FetchHtmlMetaAsync(string trackId)
+    private async Task<Dictionary<string, string>> FetchHtmlMetaAsync(string trackId, CancellationToken cancellationToken)
     {
         var url = $"https://open.spotify.com/track/{trackId}";
 
@@ -750,7 +755,7 @@ public partial class SpotifyService : ISpotifyService
         // Spotify повертає повні OG/music мета-теги лише для пошукових ботів.
         request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -759,7 +764,7 @@ public partial class SpotifyService : ISpotifyService
             return new Dictionary<string, string>();
         }
 
-        var html = await response.Content.ReadAsStringAsync();
+        var html = await response.Content.ReadAsStringAsync(cancellationToken);
         return ParseMetaTags(html);
     }
 
@@ -797,7 +802,7 @@ public partial class SpotifyService : ISpotifyService
     private async Task<SpotArtistDto> FetchArtistInfoAsync(
         string artistPageUrl,
         string? userAgent = null,
-        bool useRandomUserAgent = true)
+        bool useRandomUserAgent = true, CancellationToken cancellationToken = default)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, artistPageUrl);
         if (userAgent is not null)
@@ -805,10 +810,10 @@ public partial class SpotifyService : ISpotifyService
         else if (useRandomUserAgent)
             request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
 
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var html = await response.Content.ReadAsStringAsync();
+        var html = await response.Content.ReadAsStringAsync(cancellationToken);
         var meta = ParseMetaTags(html);
 
         return new SpotArtistDto
@@ -820,7 +825,7 @@ public partial class SpotifyService : ISpotifyService
         };
     }
 
-    private async Task EnrichPlaylistCreatorInfoAsync(string playlistUrl, SpotArtistDto creator)
+    private async Task EnrichPlaylistCreatorInfoAsync(string playlistUrl, SpotArtistDto creator, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(creator.AvatarUrl) && !string.IsNullOrWhiteSpace(creator.SpotifyUrl))
             return;
@@ -829,11 +834,11 @@ public partial class SpotifyService : ISpotifyService
         if (string.IsNullOrWhiteSpace(profileUrl))
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, playlistUrl);
-            using var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 return;
 
-            var html = await response.Content.ReadAsStringAsync();
+            var html = await response.Content.ReadAsStringAsync(cancellationToken);
             var ownerMatch = PlaylistOwnerProfileRegex().Match(html);
             if (!ownerMatch.Success)
                 return;
@@ -841,7 +846,7 @@ public partial class SpotifyService : ISpotifyService
             profileUrl = $"https://open.spotify.com{ownerMatch.Groups["path"].Value}";
         }
 
-        var profileInfo = await FetchArtistInfoAsync(profileUrl, useRandomUserAgent: false);
+        var profileInfo = await FetchArtistInfoAsync(profileUrl, useRandomUserAgent: false, cancellationToken: cancellationToken);
         creator.SpotifyUrl = profileInfo.SpotifyUrl;
         creator.AvatarUrl = profileInfo.AvatarUrl;
     }

@@ -105,7 +105,7 @@ public sealed class CollectionDownloadJobService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Не вдалося виконати завантаження колекції {JobId}", job.Id);
-                job.Fail(ex.Message);
+                job.Fail("Не вдалося завантажити колекцію. Спробуйте пізніше.");
                 DeleteDirectory(job.OutputDirectory, job.Id);
             }
         }
@@ -118,7 +118,7 @@ public sealed class CollectionDownloadJobService : BackgroundService
         var spotify = scope.ServiceProvider.GetRequiredService<ISpotifyService>();
         var downloader = scope.ServiceProvider.GetRequiredService<IDownloadService>();
         var queue = scope.ServiceProvider.GetRequiredService<DownloadQueue>();
-        var collection = await spotify.GetCollectionInfoAsync(job.Url);
+        var collection = await spotify.GetCollectionInfoAsync(job.Url, stoppingToken);
         if (collection.Tracks.Count > 1000)
             throw new InvalidOperationException("За один раз можна завантажити не більше 1000 треків.");
 
@@ -137,14 +137,14 @@ public sealed class CollectionDownloadJobService : BackgroundService
         {
             try
             {
-                var trackPath = await queue.EnqueueAsync(async () =>
+                var trackPath = await queue.EnqueueAsync(async cancellationToken =>
                 {
                     if (string.Equals(collection.Type, "playlist", StringComparison.OrdinalIgnoreCase) &&
                         string.IsNullOrWhiteSpace(track.CoverUrl))
                     {
                         try
                         {
-                            track.CoverUrl = await spotify.GetTrackCoverUrlAsync(track.SpotifyUrl)
+                            track.CoverUrl = await spotify.GetTrackCoverUrlAsync(track.SpotifyUrl, cancellationToken)
                                 ?? collection.CoverUrl;
                         }
                         catch (Exception ex)
@@ -153,7 +153,7 @@ public sealed class CollectionDownloadJobService : BackgroundService
                             track.CoverUrl = collection.CoverUrl;
                         }
                     }
-                    return await downloader.DownloadAndTagTrackAsync(track);
+                    return await downloader.DownloadAndTagTrackAsync(track, cancellationToken);
                 }, stoppingToken);
                 var retainedPath = Path.Combine(tempDirectory, $"track_{index:D4}.mp3");
                 File.Move(trackPath, retainedPath, overwrite: true);

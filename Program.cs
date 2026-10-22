@@ -82,14 +82,14 @@ app.UseStaticFiles(new StaticFileOptions
 
 // Endpoints
 
-app.MapPost("/api/track-info", async (TrackRequest request, ISpotifyService spotify) =>
+app.MapPost("/api/track-info", async (TrackRequest request, ISpotifyService spotify, CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
         return Results.BadRequest(new { error = "Поле 'url' не може бути порожнім або занадто довгим." });
 
     try
     {
-        var track = await spotify.GetTrackInfoAsync(request.Url);
+        var track = await spotify.GetTrackInfoAsync(request.Url, cancellationToken);
         return Results.Ok(track);
     }
     catch (ArgumentException ex)
@@ -99,31 +99,36 @@ app.MapPost("/api/track-info", async (TrackRequest request, ISpotifyService spot
     }
     catch (HttpRequestException ex)
     {
-        // Помилка при зверненні до Spotify API.
+        app.Logger.LogWarning(ex, "Spotify запит метаданих треку завершився помилкою.");
         return Results.Problem(
-            detail: ex.Message,
+            detail: "Не вдалося отримати дані Spotify. Спробуйте пізніше.",
             statusCode: StatusCodes.Status502BadGateway);
     }
 })
 .WithName("GetTrackInfo")
 .WithDescription("Повертає метадані Spotify-треку за посиланням.");
 
-app.MapPost("/api/download", async (TrackRequest request, ISpotifyService spotify, IDownloadService downloader, DownloadQueue queue) =>
+app.MapPost("/api/download", async (TrackRequest request, HttpContext context, ISpotifyService spotify, IDownloadService downloader, DownloadQueue queue) =>
 {
     if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
         return Results.BadRequest(new { error = "Поле 'url' не може бути порожнім або занадто довгим." });
 
     try
     {
-        var track = await spotify.GetTrackInfoAsync(request.Url);
-        var filePath = await queue.EnqueueAsync(() => downloader.DownloadAndTagTrackAsync(track));
+        var track = await spotify.GetTrackInfoAsync(request.Url, context.RequestAborted);
+        var filePath = await queue.EnqueueAsync(ct => downloader.DownloadAndTagTrackAsync(track, ct), context.RequestAborted);
         
         var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.DeleteOnClose);
         return Results.File(stream, "audio/mpeg");
     }
+    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+    {
+        return Results.Empty;
+    }
     catch (Exception ex)
     {
-        return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+        app.Logger.LogError(ex, "Не вдалося завантажити трек.");
+        return Results.Problem(detail: "Не вдалося завантажити трек. Спробуйте пізніше.", statusCode: StatusCodes.Status500InternalServerError);
     }
 })
 .WithName("DownloadTrack")
@@ -215,14 +220,14 @@ app.MapPost("/api/download-cover", async (CoverDownloadRequest request, IHttpCli
 .WithName("DownloadCover")
 .WithDescription("Завантажує обкладинку Spotify з читабельною назвою файла.");
 
-app.MapPost("/api/collection-info", async (TrackRequest request, ISpotifyService spotify) =>
+app.MapPost("/api/collection-info", async (TrackRequest request, ISpotifyService spotify, CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(request.Url) || request.Url.Length > 2000)
         return Results.BadRequest(new { error = "Посилання не може бути порожнім або занадто довгим." });
 
     try
     {
-        var collection = await spotify.GetCollectionInfoAsync(request.Url);
+        var collection = await spotify.GetCollectionInfoAsync(request.Url, cancellationToken);
         return Results.Ok(collection);
     }
     catch (ArgumentException ex)
@@ -231,11 +236,13 @@ app.MapPost("/api/collection-info", async (TrackRequest request, ISpotifyService
     }
     catch (HttpRequestException ex)
     {
-        return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
+        app.Logger.LogWarning(ex, "Spotify запит колекції завершився помилкою.");
+        return Results.Problem(detail: "Не вдалося отримати дані Spotify. Спробуйте пізніше.", statusCode: StatusCodes.Status502BadGateway);
     }
     catch (InvalidOperationException ex)
     {
-        return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status502BadGateway);
+        app.Logger.LogWarning(ex, "Spotify повернув неочікувані дані колекції.");
+        return Results.Problem(detail: "Не вдалося прочитати колекцію Spotify. Спробуйте пізніше.", statusCode: StatusCodes.Status502BadGateway);
     }
 })
 .WithName("GetCollectionInfo")
