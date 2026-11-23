@@ -1,5 +1,17 @@
 // SpotGet Frontend
 
+function downloadBlob(blob, filename) {
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
 const form = document.getElementById('trackForm');
 const urlInput = document.getElementById('spotifyUrl');
 const pasteBtn = document.getElementById('pasteBtn');
@@ -244,15 +256,7 @@ downloadBtn.addEventListener('click', async () => {
             }
         }
 
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = downloadUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(downloadUrl);
-        a.remove();
+        downloadBlob(blob, filename);
         showDownloadNotification(filename);
 
     } catch (err) {
@@ -296,17 +300,11 @@ async function downloadCoverImage(src, filename, button) {
         }
 
         const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = objectUrl;
         const disposition = response.headers.get('Content-Disposition') || '';
         const encodedName = disposition.match(/filename\*=UTF-8''([^;\n]*)/i);
-        anchor.download = encodedName ? decodeURIComponent(encodedName[1]) : `${filename}.jpg`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-        showDownloadNotification(anchor.download);
+        const downloadName = encodedName ? decodeURIComponent(encodedName[1]) : `${filename}.jpg`;
+        downloadBlob(blob, downloadName);
+        showDownloadNotification(downloadName);
     } catch {
         showError(translations[currentLang].errCover);
     } finally {
@@ -536,14 +534,7 @@ async function downloadCollectionTrack(track, button) {
 
         const blob = await response.blob();
         const filename = `${safeFilenamePart(track.artist)} - ${safeFilenamePart(track.title)}.mp3`;
-        const objectUrl = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = objectUrl;
-        anchor.download = filename;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        downloadBlob(blob, filename);
         showDownloadNotification(filename);
     } catch {
         showError(translations[currentLang].errDlGeneric);

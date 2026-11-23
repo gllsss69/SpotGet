@@ -751,11 +751,11 @@ public partial class SpotifyService : ISpotifyService
     {
         var url = $"https://open.spotify.com/track/{trackId}";
 
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
         // Spotify повертає повні OG/music мета-теги лише для пошукових ботів.
         request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
 
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -804,13 +804,13 @@ public partial class SpotifyService : ISpotifyService
         string? userAgent = null,
         bool useRandomUserAgent = true, CancellationToken cancellationToken = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, artistPageUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Get, artistPageUrl);
         if (userAgent is not null)
             request.Headers.UserAgent.ParseAdd(userAgent);
         else if (useRandomUserAgent)
             request.Headers.UserAgent.ParseAdd(GetRandomUserAgent());
 
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var html = await response.Content.ReadAsStringAsync(cancellationToken);

@@ -1,6 +1,6 @@
 @SpotGet_HostAddress = http://localhost:5265
 
-GET {{SpotGet_HostAddress}}/weatherforecast/
+GET {{SpotGet_HostAddress}}/health
 Accept: application/json
 
 ###
