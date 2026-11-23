@@ -739,6 +739,16 @@ body {
     margin-top: 1rem;
 }
 
+.actions-row .download-mp3-btn {
+    flex: 0 0 16rem;
+    width: 16rem;
+}
+
+.actions-row .spotify-link {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 .download-mp3-btn {
     display: inline-flex;
     align-items: center;
@@ -770,6 +780,55 @@ body {
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
+}
+
+.dl-loader,
+.collection-dl-loader {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+    width: min(13rem, 55vw);
+    min-width: 5rem;
+}
+
+.dl-loader[hidden],
+.collection-dl-loader[hidden] {
+    display: none;
+}
+
+.download-progress-label,
+.collection-dl-progress {
+    font-size: 0.72rem;
+    line-height: 1.2;
+}
+
+.download-progress-track {
+    display: block;
+    width: 100%;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.22);
+}
+
+.download-progress-fill {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: currentColor;
+    transition: width 160ms ease;
+}
+
+.download-progress-track.is-indeterminate .download-progress-fill {
+    width: 38%;
+    animation: download-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes download-progress-indeterminate {
+    from { transform: translateX(-110%); }
+    to { transform: translateX(270%); }
 }
 
 
@@ -847,6 +906,74 @@ body {
     line-height: 1.4;
 }
 
+.info-section {
+    display: grid;
+    gap: 1rem;
+    margin: 2.5rem 0 1rem;
+}
+
+.info-card {
+    padding: 1.35rem 1.5rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+}
+
+.info-card h2 {
+    margin-bottom: 1rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.usage-steps {
+    display: grid;
+    gap: 1rem;
+    list-style: none;
+}
+
+.usage-steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+}
+
+.step-number {
+    display: grid;
+    flex: 0 0 1.65rem;
+    width: 1.65rem;
+    height: 1.65rem;
+    place-items: center;
+    border: 1px solid rgba(30, 215, 96, 0.3);
+    border-radius: 50%;
+    background: rgba(30, 215, 96, 0.09);
+    color: var(--spotify-green-light);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.usage-steps h3 {
+    margin: 0 0 0.2rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+.usage-steps p,
+.independence-card p {
+    color: var(--text-secondary);
+    font-size: 0.83rem;
+    line-height: 1.6;
+}
+
+.independence-card p + p {
+    margin-top: 0.7rem;
+}
+
+.independence-card .usage-note {
+    color: var(--text-muted);
+    font-size: 0.77rem;
+}
+
 /* Footer */
 .footer {
     text-align: center;
@@ -858,6 +985,10 @@ body {
 
 /* Responsive */
 @media (max-width: 560px) {
+    .info-card {
+        padding: 1.15rem 1rem;
+    }
+
     .result-card {
         flex-direction: column;
         align-items: center;
@@ -871,6 +1002,17 @@ body {
 
     .result-info {
         align-items: center;
+    }
+
+    .actions-row {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.75rem;
+    }
+
+    .actions-row .download-mp3-btn {
+        flex: 0 1 16rem;
+        width: min(16rem, 100%);
     }
 
     .meta-row {

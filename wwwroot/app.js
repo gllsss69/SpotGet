@@ -40,6 +40,8 @@ const downloadCollectionBtn = document.getElementById('downloadCollectionBtn');
 const collectionDlText = downloadCollectionBtn.querySelector('.collection-dl-text');
 const collectionDlLoader = downloadCollectionBtn.querySelector('.collection-dl-loader');
 const collectionDlProgress = downloadCollectionBtn.querySelector('.collection-dl-progress');
+const collectionProgressTrack = downloadCollectionBtn.querySelector('.download-progress-track');
+const collectionProgressFill = collectionProgressTrack.querySelector('.download-progress-fill');
 const coverImg = document.getElementById('coverImg');
 const trackTitle = document.getElementById('trackTitle');
 const trackArtist = document.getElementById('trackArtist');
@@ -50,6 +52,9 @@ const trackLink = document.getElementById('trackLink');
 const downloadBtn = document.getElementById('downloadBtn');
 const dlText = downloadBtn.querySelector('.dl-text');
 const dlLoader = downloadBtn.querySelector('.dl-loader');
+const downloadProgressTrack = downloadBtn.querySelector('.download-progress-track');
+const downloadProgressFill = downloadProgressTrack.querySelector('.download-progress-fill');
+const downloadProgressLabel = downloadBtn.querySelector('.download-progress-label');
 
 const resultCover = document.querySelector('.result-cover');
 const downloadCoverBtn = document.getElementById('downloadCoverBtn');
@@ -112,7 +117,8 @@ form.addEventListener('submit', async (e) => {
         const data = await response.json();
 
         if (!response.ok) {
-            showError(translateError(data.error || data.detail || 'Unknown error'));
+            showError(translateError(data.error || data.detail,
+                translations[currentLang][collectionMatch ? 'errCollection' : 'errSpotify']));
             return;
         }
 
@@ -139,7 +145,7 @@ downloadCollectionBtn.addEventListener('click', async () => {
         });
         if (!startResponse.ok) {
             const data = await startResponse.json().catch(() => ({}));
-            showError(translateError(data.error || data.detail || translations[currentLang].errDl));
+            showError(translateError(data.error || data.detail, translations[currentLang].errCollection));
             return;
         }
 
@@ -155,31 +161,39 @@ downloadCollectionBtn.addEventListener('click', async () => {
             if (statusResponse.status === 429) continue;
             if (!statusResponse.ok) {
                 const data = await statusResponse.json().catch(() => ({}));
-                showError(translateError(data.error || data.detail || translations[currentLang].errDl));
+                showError(translateError(data.error || data.detail, translations[currentLang].errCollection));
                 return;
             }
 
             jobStatus = await statusResponse.json();
             if (jobStatus.status === 'preparing') {
                 collectionDlProgress.textContent = translations[currentLang].collectionPreparing;
+                setProgress(collectionProgressTrack, collectionProgressFill, null, collectionDlProgress.textContent);
             } else if (jobStatus.status === 'downloading') {
                 collectionDlProgress.textContent = translations[currentLang].collectionProgress
                     .replace('{progress}', jobStatus.progress)
                     .replace('{total}', jobStatus.total);
+                setProgress(collectionProgressTrack, collectionProgressFill,
+                    jobStatus.total > 0 ? jobStatus.progress / jobStatus.total * 100 : null,
+                    collectionDlProgress.textContent);
             } else if (jobStatus.status === 'packing') {
                 collectionDlProgress.textContent = translations[currentLang].collectionPacking;
+                setProgress(collectionProgressTrack, collectionProgressFill, null, collectionDlProgress.textContent);
             } else if (jobStatus.status === 'sending') {
                 collectionDlProgress.textContent = translations[currentLang].collectionSending;
+                setProgress(collectionProgressTrack, collectionProgressFill, null, collectionDlProgress.textContent);
             }
 
             if (jobStatus.status === 'failed') {
-                showError(translateError(jobStatus.error || translations[currentLang].errDl));
+                showError(translateError(jobStatus.error, translations[currentLang].errCollection));
                 return;
             }
             if (jobStatus.status === 'completed') break;
         }
 
         const filename = jobStatus.fileName || `${collectionTitle.textContent || 'Spotify collection'}.zip`;
+        collectionDlProgress.textContent = translations[currentLang].collectionSending;
+        setProgress(collectionProgressTrack, collectionProgressFill, null, collectionDlProgress.textContent);
         const anchor = document.createElement('a');
         anchor.href = `/api/download-collection/${encodeURIComponent(jobId)}/file`;
         anchor.download = filename;
@@ -200,7 +214,7 @@ downloadCollectionBtn.addEventListener('click', async () => {
                 continue;
             }
             if (jobStatus.status === 'failed') {
-                showError(translateError(jobStatus.error || translations[currentLang].errDl));
+                showError(translateError(jobStatus.error, translations[currentLang].errCollection));
                 return;
             }
             break;
@@ -236,11 +250,15 @@ downloadBtn.addEventListener('click', async () => {
 
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            showError(translateError(data.error || data.detail || translations[currentLang].errDl));
+            showError(translateError(data.error || data.detail, translations[currentLang].errDl));
             return;
         }
 
-        const blob = await response.blob();
+        const blob = await readResponseBlob(response, percent => {
+            const label = percent === null ? translations[currentLang].downloadPreparing : `${Math.round(percent)}%`;
+            downloadProgressLabel.textContent = label;
+            setProgress(downloadProgressTrack, downloadProgressFill, percent, label);
+        });
 
         let filename = `${trackArtist.textContent} - ${trackTitle.textContent}.mp3`;
         const disposition = response.headers.get('Content-Disposition');
@@ -295,7 +313,7 @@ async function downloadCoverImage(src, filename, button) {
         });
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            showError(translateError(data.error || data.detail || translations[currentLang].errCover));
+            showError(translateError(data.error || data.detail, translations[currentLang].errCover));
             return;
         }
 
@@ -359,6 +377,10 @@ function setDownloadLoading(on) {
     downloadBtn.disabled = on;
     dlText.hidden = on;
     dlLoader.hidden = !on;
+    if (on) {
+        downloadProgressLabel.textContent = translations[currentLang].downloadPreparing;
+        setProgress(downloadProgressTrack, downloadProgressFill, null, downloadProgressLabel.textContent);
+    }
 }
 
 function setCollectionDownloadLoading(on) {
@@ -366,6 +388,42 @@ function setCollectionDownloadLoading(on) {
     collectionDlText.hidden = on;
     collectionDlLoader.hidden = !on;
     collectionDlProgress.textContent = on ? translations[currentLang].collectionPreparing : '';
+    if (on) setProgress(collectionProgressTrack, collectionProgressFill, null, collectionDlProgress.textContent);
+}
+
+function setProgress(track, fill, percent, label) {
+    track.classList.toggle('is-indeterminate', percent === null);
+    if (percent === null) {
+        fill.style.width = '';
+        track.removeAttribute('aria-valuenow');
+    } else {
+        const bounded = Math.max(0, Math.min(100, percent));
+        fill.style.width = `${bounded}%`;
+        track.setAttribute('aria-valuenow', String(Math.round(bounded)));
+    }
+    track.setAttribute('aria-valuetext', label);
+}
+
+async function readResponseBlob(response, onProgress) {
+    const total = Number(response.headers.get('Content-Length'));
+    if (!response.body) {
+        const blob = await response.blob();
+        onProgress(Number.isFinite(total) && total > 0 ? 100 : null);
+        return blob;
+    }
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        onProgress(Number.isFinite(total) && total > 0 ? received / total * 100 : null);
+    }
+    if (Number.isFinite(total) && total > 0) onProgress(100);
+    return new Blob(chunks, { type: response.headers.get('Content-Type') || 'application/octet-stream' });
 }
 
 function setLoading(on) {
@@ -528,7 +586,7 @@ async function downloadCollectionTrack(track, button) {
 
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            showError(translateError(data.error || data.detail || translations[currentLang].errDl));
+            showError(translateError(data.error || data.detail, translations[currentLang].errDl));
             return;
         }
 
