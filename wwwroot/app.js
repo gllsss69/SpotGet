@@ -78,9 +78,131 @@ if (topBar && heroTitle && 'IntersectionObserver' in window) {
     titleObserver.observe(heroTitle);
 }
 
+const audioVisualizer = document.getElementById('audioVisualizer');
+const visualizerBars = [];
+const visualizerBarCount = 96;
+if (audioVisualizer) {
+    for (let index = 0; index < visualizerBarCount; index++) {
+        const bar = document.createElement('span');
+        bar.className = 'audio-visualizer__bar';
+        audioVisualizer.appendChild(bar);
+        visualizerBars.push(bar);
+    }
+}
+
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!prefersReducedMotion && 'IntersectionObserver' in window) {
+    const revealTargets = document.querySelectorAll('.info-card, .usage-steps li');
+    const revealObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            entry.target.classList.add('is-visible');
+            revealObserver.unobserve(entry.target);
+        });
+    }, { threshold: 0.12, rootMargin: '0px 0px -24px 0px' });
+
+    revealTargets.forEach((element, index) => {
+        element.classList.add('scroll-reveal');
+        element.style.setProperty('--reveal-delay', `${Math.min(index % 6, 4) * 80}ms`);
+        revealObserver.observe(element);
+    });
+}
+
 let currentAudio = null;
 let isPlaying = false;
 let currentCollection = null;
+let audioContext = null;
+let audioAnalyser = null;
+let audioSourceNode = null;
+let audioSourceElement = null;
+let visualizerAnimationFrame = null;
+let frequencyData = null;
+let frequencyBands = [];
+let visualizerLevels = Array(visualizerBarCount).fill(0.025);
+let lastVisualizerFrameTime = 0;
+
+function connectPreviewVisualizer(audio) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (prefersReducedMotion || !visualizerBars.length || !AudioContextClass) return false;
+
+    try {
+        if (!audioContext) {
+            audioContext = new AudioContextClass();
+            audioAnalyser = audioContext.createAnalyser();
+            audioAnalyser.fftSize = 1024;
+            audioAnalyser.smoothingTimeConstant = 0.84;
+            audioAnalyser.connect(audioContext.destination);
+            frequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
+            const minBin = 1;
+            const maxBin = Math.max(minBin + 1, Math.floor(frequencyData.length * 0.72));
+            frequencyBands = visualizerBars.map((_, index) => ({
+                start: Math.floor(minBin * (maxBin / minBin) ** (index / visualizerBarCount)),
+                end: Math.max(
+                    Math.floor(minBin * (maxBin / minBin) ** (index / visualizerBarCount)) + 1,
+                    Math.floor(minBin * (maxBin / minBin) ** ((index + 1) / visualizerBarCount))
+                )
+            }));
+        }
+
+        if (audioSourceNode && audioSourceElement === audio) return true;
+        if (audioSourceNode) audioSourceNode.disconnect();
+        audioSourceNode = audioContext.createMediaElementSource(audio);
+        audioSourceElement = audio;
+        audioSourceNode.connect(audioAnalyser);
+        return true;
+    } catch {
+        audioSourceNode = null;
+        audioSourceElement = null;
+        return false;
+    }
+}
+
+function startPreviewVisualizer() {
+    if (!audioAnalyser || visualizerAnimationFrame !== null) return;
+    document.body.classList.add('audio-preview-playing');
+
+    const renderFrame = timestamp => {
+        if (!audioAnalyser || !currentAudio || currentAudio.paused) {
+            stopPreviewVisualizer();
+            return;
+        }
+
+        audioAnalyser.getByteFrequencyData(frequencyData);
+        const binCount = frequencyData.length;
+        const deltaTime = lastVisualizerFrameTime
+            ? Math.min(timestamp - lastVisualizerFrameTime, 50)
+            : 16.67;
+        lastVisualizerFrameTime = timestamp;
+
+        visualizerBars.forEach((bar, index) => {
+            const { start, end } = frequencyBands[index];
+            let sum = 0;
+            for (let bin = start; bin < Math.min(end, binCount); bin++) sum += frequencyData[bin];
+            const average = sum / Math.max(1, Math.min(end, binCount) - start);
+            const targetLevel = 0.025 + (average / 255) * 0.78;
+            const responseTime = targetLevel > visualizerLevels[index] ? 110 : 210;
+            const blend = 1 - Math.exp(-deltaTime / responseTime);
+            visualizerLevels[index] += (targetLevel - visualizerLevels[index]) * blend;
+            bar.style.setProperty('--audio-level', visualizerLevels[index].toFixed(3));
+        });
+
+        visualizerAnimationFrame = requestAnimationFrame(renderFrame);
+    };
+
+    lastVisualizerFrameTime = 0;
+    visualizerAnimationFrame = requestAnimationFrame(renderFrame);
+}
+
+function stopPreviewVisualizer() {
+    if (visualizerAnimationFrame !== null) {
+        cancelAnimationFrame(visualizerAnimationFrame);
+        visualizerAnimationFrame = null;
+    }
+    document.body.classList.remove('audio-preview-playing');
+    lastVisualizerFrameTime = 0;
+    visualizerLevels.fill(0.025);
+    visualizerBars.forEach(bar => bar.style.setProperty('--audio-level', '0.025'));
+}
 
 // Paste button
 pasteBtn.addEventListener('click', async () => {
@@ -338,11 +460,25 @@ coverOverlay.addEventListener('click', () => {
     if (isPlaying) {
         currentAudio.pause();
         isPlaying = false;
+        stopPreviewVisualizer();
+        updatePlayIcon(false);
     } else {
-        currentAudio.play();
-        isPlaying = true;
+        const audio = currentAudio;
+        const canVisualize = connectPreviewVisualizer(audio);
+        if (canVisualize && audioContext.state === 'suspended') audioContext.resume().catch(() => {});
+
+        audio.play().then(() => {
+            if (currentAudio !== audio) return;
+            isPlaying = true;
+            updatePlayIcon(true);
+            if (canVisualize) startPreviewVisualizer();
+        }).catch(() => {
+            if (currentAudio !== audio) return;
+            isPlaying = false;
+            stopPreviewVisualizer();
+            updatePlayIcon(false);
+        });
     }
-    updatePlayIcon(isPlaying);
 });
 
 function updatePlayIcon(playing) {
@@ -366,6 +502,12 @@ function stopAudio() {
         currentAudio.currentTime = 0;
         currentAudio = null;
     }
+    if (audioSourceNode) {
+        audioSourceNode.disconnect();
+        audioSourceNode = null;
+        audioSourceElement = null;
+    }
+    stopPreviewVisualizer();
     isPlaying = false;
     previewProgress.style.width = '0%';
     updatePlayIcon(false);
@@ -476,11 +618,21 @@ function showResult(track) {
     trackLink.href = track.spotifyUrl;
 
     if (track.previewUrl) {
-        currentAudio = new Audio(track.previewUrl);
-        currentAudio.onended = () => stopAudio();
-        currentAudio.ontimeupdate = () => {
-            if (currentAudio && currentAudio.duration) {
-                const percent = (currentAudio.currentTime / currentAudio.duration) * 100;
+        const previewAudio = new Audio();
+        previewAudio.crossOrigin = 'anonymous';
+        previewAudio.src = track.previewUrl;
+        currentAudio = previewAudio;
+        previewAudio.onended = () => {
+            if (currentAudio !== previewAudio) return;
+            previewAudio.currentTime = 0;
+            isPlaying = false;
+            previewProgress.style.width = '0%';
+            stopPreviewVisualizer();
+            updatePlayIcon(false);
+        };
+        previewAudio.ontimeupdate = () => {
+            if (currentAudio === previewAudio && previewAudio.duration) {
+                const percent = (previewAudio.currentTime / previewAudio.duration) * 100;
                 previewProgress.style.width = `${percent}%`;
             }
         };

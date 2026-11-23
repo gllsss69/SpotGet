@@ -45,6 +45,55 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+body::after {
+    position: fixed;
+    inset: -18%;
+    z-index: 0;
+    content: "";
+    opacity: 0.72;
+    background:
+        radial-gradient(ellipse at 18% 78%, rgba(112, 52, 190, 0.12), transparent 38%),
+        radial-gradient(ellipse at 82% 26%, rgba(29, 185, 84, 0.14), transparent 42%),
+        radial-gradient(ellipse at 62% 88%, rgba(15, 120, 85, 0.09), transparent 35%);
+    animation: ambient-drift 22s ease-in-out infinite alternate;
+    pointer-events: none;
+}
+
+.audio-visualizer {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-evenly;
+    gap: clamp(1px, 0.25vw, 4px);
+    height: clamp(180px, 42vh, 440px);
+    padding: 0 2vw;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    mask-image: linear-gradient(to top, #000 0%, rgb(0 0 0 / 0.75) 42%, transparent 100%);
+    transition: opacity 500ms ease;
+}
+
+.audio-preview-playing .audio-visualizer {
+    opacity: 0.5;
+    filter: drop-shadow(0 0 14px rgb(29 185 84 / 0.34));
+}
+
+.audio-visualizer__bar {
+    flex: 1 1 0;
+    max-width: 10px;
+    height: 100%;
+    border-radius: 999px 999px 0 0;
+    background: linear-gradient(to top, rgb(29 185 84 / 0.05), rgb(45 205 114 / 0.42));
+    box-shadow: 0 0 10px rgb(29 185 84 / 0.2);
+    transform: scaleY(var(--audio-level, 0.025));
+    transform-origin: bottom;
+    transition: none;
+    will-change: transform;
+}
+
 /* Ambient background glow */
 .bg-glow {
     position: fixed;
@@ -53,9 +102,9 @@ body {
     left: 50%;
     translate: -50% -50%;
     /* Центруємо коло відносно точки 15vh */
-    width: 1200px;
-    height: 1200px;
-    background: radial-gradient(circle, rgba(29, 185, 84, 0.14) 0%, transparent 65%);
+    width: min(1450px, 150vw);
+    height: min(1450px, 150vw);
+    background: radial-gradient(circle, rgba(29, 185, 84, 0.26) 0%, rgba(29, 185, 84, 0.1) 29%, transparent 68%);
     pointer-events: none;
     z-index: 0;
     animation: pulse-glow 6s ease-in-out infinite alternate;
@@ -71,6 +120,24 @@ body {
         opacity: 1;
         scale: 1.15;
     }
+}
+
+@keyframes ambient-drift {
+    from { transform: translate3d(-1.5%, -1%, 0) scale(0.98); }
+    to { transform: translate3d(1.5%, 1%, 0) scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bg-glow,
+    body::after,
+    .audio-visualizer,
+    .audio-visualizer__bar,
+    .scroll-reveal {
+        animation: none;
+        transition: none;
+    }
+
+    .audio-visualizer__bar { will-change: auto; }
 }
 
 /* Container */
@@ -917,6 +984,17 @@ body {
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+}
+
+.scroll-reveal {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity 650ms ease var(--reveal-delay, 0ms), transform 650ms cubic-bezier(0.2, 0.7, 0.2, 1) var(--reveal-delay, 0ms);
+}
+
+.scroll-reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .info-card h2 {
